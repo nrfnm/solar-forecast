@@ -16,6 +16,7 @@ dependencies = [
     "retry-requests>=2.0",
     "properscoring>=0.1",
     "matplotlib>=3.7",
+    "cdsapi>=0.7",
 ]
 
 [project.optional-dependencies]
