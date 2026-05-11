@@ -1,4 +1,5 @@
 # solar_forecast/clearsky.py
+"""Clear-sky solar irradiance estimation using pvlib."""
 
 import pandas as pd
 import pvlib
