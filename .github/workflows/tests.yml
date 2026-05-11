@@ -1,13 +1,13 @@
-name: Pylint
+name: Tests
 
 on: [push]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python 3.12
+    - name: Set up Python 3.11
       uses: actions/setup-python@v3
       with:
         python-version: "3.12"
@@ -17,7 +17,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pylint
-    - name: Analysing the code with pylint
+        pip install -e ".[dev]"
+    - name: Run tests
       run: |
-        pylint $(git ls-files '*.py') --disable=import-error
+        pytest tests/ -v
