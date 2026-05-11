@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "solar_forecast"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "pvlib>=0.10",
     "lightgbm>=4.0",
@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pytest-cov",
     "jupyter>=1.0",
 ]
 
