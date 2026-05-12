@@ -11,8 +11,9 @@ from typing import Optional
 from solar_forecast.clearsky import get_clearsky
 from solar_forecast.fetch_actuals import fetch_era5, fetch_entsoe
 from solar_forecast.features import build_features
+import config
 
-_MODEL_PATH = Path(__file__).parent.parent / "models" / "lgbm_ci.pkl"
+_MODEL_PATH = config.MODEL_PATH
 
 # ci excluded — it's ERA5-derived during training and would cause leakage;
 # lag/rolling features of ci are included since they're shifted (no direct leakage).
@@ -37,35 +38,33 @@ FEATURE_COLS = [
     "member_id",
 ]
 
-DEFAULT_PARAMS: dict = {
-    "objective": "regression",
-    "metric": "rmse",
-    "num_leaves": 63,
-    "learning_rate": 0.05,
-    "n_estimators": 1000,
-    "min_child_samples": 50,
-    "subsample": 0.8,
-    "colsample_bytree": 0.8,
-    "n_jobs": -1,
-    "verbose": -1,
-}
+DEFAULT_PARAMS: dict = config.LGBM_PARAMS
 
 
 def _target_ci(
     actuals: pd.Series,
     clearsky: pd.DataFrame,
-    installed_capacity_mw: float,
+    installed_capacity_mw: "float | pd.Series",
     stc_irradiance: float = 1000.0,
 ) -> pd.Series:
     """
     Compute actual clearness index = actual_mw / clearsky_mw.
 
-    clearsky_mw is derived by scaling poa_clearsky (W/m²) to MW assuming panels
-    produce at rated capacity under STC irradiance (1000 W/m²).
+    installed_capacity_mw may be a scalar (fixed) or a monthly pd.Series
+    (time-varying). When a Series is passed it is forward-filled to the
+    hourly actuals index so every timestamp gets the capacity that was
+    installed at that point in time.
     """
     cs_poa = clearsky["poa_clearsky"].reindex(actuals.index)
     is_day = clearsky["is_daytime"].reindex(actuals.index)
-    clearsky_mw = (cs_poa / stc_irradiance) * installed_capacity_mw
+
+    if isinstance(installed_capacity_mw, pd.Series):
+        cap = installed_capacity_mw.tz_convert(actuals.index.tz)
+        cap = cap.reindex(actuals.index.union(cap.index)).ffill().reindex(actuals.index)
+    else:
+        cap = installed_capacity_mw
+
+    clearsky_mw = (cs_poa / stc_irradiance) * cap
     ci = (actuals / clearsky_mw).clip(0, 1.1)
     return ci.where(is_day, 0.0).rename("ci_actual")
 
@@ -105,7 +104,15 @@ def prepare_training_data(
     actuals = fetch_entsoe(area, start, end, api_key=entsoe_api_key)
     actuals = actuals.tz_convert(tz).reindex(feats.index)
 
-    y = _target_ci(actuals, clearsky, installed_capacity_mw)
+    try:
+        from solar_forecast.capacity import capacity_timeseries
+        cap = capacity_timeseries(tz="UTC")
+        print(f"  Time-varying capacity: {cap.min():.0f}–{cap.max():.0f} MW")
+    except FileNotFoundError:
+        cap = installed_capacity_mw
+        print(f"  MaStR DB not available, using fixed capacity: {cap:.0f} MW")
+
+    y = _target_ci(actuals, clearsky, cap)
 
     valid = y.notna() & feats["is_daytime"].astype(bool)
     return feats.loc[valid, FEATURE_COLS], y[valid]
@@ -239,13 +246,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Train LightGBM CI model.")
-    parser.add_argument("--lat", type=float, default=51.0, help="Representative latitude")
-    parser.add_argument("--lon", type=float, default=10.0, help="Representative longitude")
+    parser.add_argument("--lat", type=float, default=config.LAT)
+    parser.add_argument("--lon", type=float, default=config.LON)
     parser.add_argument("--start", default="2020-01-01")
     parser.add_argument("--end", default="2023-12-31")
-    parser.add_argument("--capacity-mw", type=float, default=65_000.0,
-                        help="Installed solar capacity in MW (default: ~DE 2023)")
-    parser.add_argument("--area", default="DE", help="ENTSO-E area: DE or AT")
+    parser.add_argument("--capacity-mw", type=float, default=config.CAPACITY_MW)
+    parser.add_argument("--area", default=config.AREA, help="ENTSO-E area: DE or AT")
     parser.add_argument("--no-cv", action="store_true", help="Skip walk-forward CV")
     args = parser.parse_args()
 

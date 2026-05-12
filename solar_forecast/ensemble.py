@@ -10,8 +10,9 @@ from solar_forecast.clearsky import get_clearsky
 from solar_forecast.fetch_nwp import fetch_nwp
 from solar_forecast.features import build_features
 from solar_forecast.train import FEATURE_COLS, load_model
+import config
 
-_STC_IRRADIANCE = 1000.0  # W/m²
+_STC_IRRADIANCE = config.STC_IRRADIANCE
 
 
 def _pivot_nwp(nwp_raw: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
@@ -134,10 +135,10 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Run ensemble forecast for a single location.")
-    parser.add_argument("--lat", type=float, default=51.0)
-    parser.add_argument("--lon", type=float, default=10.0)
-    parser.add_argument("--capacity-mw", type=float, default=65_000.0)
-    parser.add_argument("--days", type=int, default=7)
+    parser.add_argument("--lat", type=float, default=config.LAT)
+    parser.add_argument("--lon", type=float, default=config.LON)
+    parser.add_argument("--capacity-mw", type=float, default=config.CAPACITY_MW)
+    parser.add_argument("--days", type=int, default=config.FORECAST_DAYS)
     args = parser.parse_args()
 
     trajectories = forecast(
