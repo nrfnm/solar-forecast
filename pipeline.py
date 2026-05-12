@@ -7,7 +7,7 @@ from datetime import date
 from typing import Optional
 
 import config
-from solar_forecast.ensemble import forecast
+from solar_forecast.ensemble import forecast_country
 from solar_forecast.fetch_actuals import fetch_entsoe
 from solar_forecast.evaluate import evaluate, print_summary
 from solar_forecast.calibrate import apply_spread_correction
@@ -17,9 +17,6 @@ _OUTPUT_DIR = Path(__file__).parent / "data" / "forecasts"
 
 def run(
     run_date: Optional[str] = None,
-    lat: float = config.LAT,
-    lon: float = config.LON,
-    installed_capacity_mw: float = config.CAPACITY_MW,
     forecast_days: int = config.FORECAST_DAYS,
     spread_factor: float = 1.0,
     entsoe_api_key: Optional[str] = None,
@@ -27,7 +24,10 @@ def run(
     save: bool = True,
 ) -> pd.DataFrame:
     """
-    Run the daily forecast pipeline for a single location.
+    Run the daily forecast pipeline.
+
+    Uses config.CENTROIDS for spatial aggregation if set, otherwise falls
+    back to the single point config.LAT / config.LON.
 
     Parameters
     ----------
@@ -48,15 +48,11 @@ def run(
         Shape (timesteps, n_members) in MW.
     """
     run_date = run_date or str(date.today())
-    print(f"=== Pipeline run: {run_date} ===")
+    n_centroids = len(config.CENTROIDS) if config.CENTROIDS else 1
+    print(f"=== Pipeline run: {run_date} ({n_centroids} centroid(s)) ===")
 
     print("Fetching NWP and running ensemble model...")
-    trajectories = forecast(
-        lat=lat,
-        lon=lon,
-        installed_capacity_mw=installed_capacity_mw,
-        forecast_days=forecast_days,
-    )
+    trajectories = forecast_country(forecast_days=forecast_days)
     print(f"  Output: {trajectories.shape[0]} timesteps × {trajectories.shape[1]} members")
 
     if spread_factor != 1.0:
@@ -91,9 +87,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run daily solar forecast pipeline.")
     parser.add_argument("--date", default=None, help="Run date YYYY-MM-DD (default: today)")
-    parser.add_argument("--lat", type=float, default=config.LAT)
-    parser.add_argument("--lon", type=float, default=config.LON)
-    parser.add_argument("--capacity-mw", type=float, default=config.CAPACITY_MW)
     parser.add_argument("--days", type=int, default=config.FORECAST_DAYS)
     parser.add_argument("--spread-factor", type=float, default=1.0,
                         help="Spread correction factor (default: 1.0 = no correction)")
@@ -104,9 +97,6 @@ if __name__ == "__main__":
 
     run(
         run_date=args.date,
-        lat=args.lat,
-        lon=args.lon,
-        installed_capacity_mw=args.capacity_mw,
         forecast_days=args.days,
         spread_factor=args.spread_factor,
         entsoe_api_key=os.environ.get("ENTSOE_API_KEY"),

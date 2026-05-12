@@ -131,6 +131,55 @@ def forecast(
     return run_ensemble(model, nwp_raw, clearsky, installed_capacity_mw)
 
 
+def forecast_country(
+    model: Optional[lgb.LGBMRegressor] = None,
+    model_path: Optional[Path] = None,
+    forecast_days: int = config.FORECAST_DAYS,
+    nwp_model: str = "ecmwf_ifs025",
+) -> pd.DataFrame:
+    """
+    Run ensemble forecast aggregated across all centroids in config.CENTROIDS.
+
+    If config.CENTROIDS is None, falls back to a single-point forecast using
+    config.LAT / config.LON / config.CAPACITY_MW.
+
+    Each centroid contributes: forecast(lat, lon, CAPACITY_MW × weight).
+    Outputs are summed to produce the country-level MW trajectories.
+
+    Returns
+    -------
+    pd.DataFrame
+        Shape (timesteps, n_members) in MW.
+    """
+    if model is None:
+        model = load_model(model_path)
+
+    if not config.CENTROIDS:
+        return forecast(
+            lat=config.LAT,
+            lon=config.LON,
+            installed_capacity_mw=config.CAPACITY_MW,
+            forecast_days=forecast_days,
+            model=model,
+            nwp_model=nwp_model,
+        )
+
+    total: Optional[pd.DataFrame] = None
+    for i, c in enumerate(config.CENTROIDS):
+        print(f"  Centroid {i+1}/{len(config.CENTROIDS)}: lat={c['lat']}, lon={c['lon']}, weight={c['weight']:.3f}")
+        traj = forecast(
+            lat=c["lat"],
+            lon=c["lon"],
+            installed_capacity_mw=config.CAPACITY_MW * c["weight"],
+            forecast_days=forecast_days,
+            model=model,
+            nwp_model=nwp_model,
+        )
+        total = traj if total is None else total + traj
+
+    return total
+
+
 if __name__ == "__main__":
     import argparse
 

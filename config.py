@@ -28,7 +28,14 @@ CAPACITY_MW = 65_000.0
 STC_IRRADIANCE = 1000.0  # W/m² — irradiance at which panels produce rated capacity
 
 # --- Forecast ---
-FORECAST_DAYS = 7
+FORECAST_DAYS = 1
+
+# --- Spatial centroids ---
+# Capacity-weighted grid points derived from MaStR k-means clustering.
+# Generate with: python solar_forecast/capacity.py --k 5
+# Then paste the printed output here as a list of dicts.
+# Set to None to fall back to the single point (LAT, LON) above.
+CENTROIDS: list[dict] | None = None
 
 # --- LightGBM hyperparameters ---
 LGBM_PARAMS: dict = {
