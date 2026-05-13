@@ -59,6 +59,10 @@ def run(
         print(f"  Applying spread correction (factor={spread_factor:.3f})...")
         trajectories = apply_spread_correction(trajectories, spread_factor)
 
+    if evaluate_actuals and pd.Timestamp(run_date) >= pd.Timestamp.now().normalize():
+        print("  Skipping evaluation — run_date is not in the past.")
+        evaluate_actuals = False
+
     if evaluate_actuals:
         token = entsoe_api_key or os.environ.get("ENTSOE_API_KEY")
         if not token:
