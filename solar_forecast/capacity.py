@@ -71,6 +71,53 @@ def clean_db() -> pd.DataFrame:
 
     return df[_REQUIRED_COLS].reset_index(drop=True)
 
+def capacity_timeseries(tz: str = "UTC") -> pd.Series:
+    """
+    Build cumulative installed solar capacity (MW) per month from MaStR commissioning dates.
+
+    Nettonennleistung is stored in kW in MaStR → divided by 1000 to get MW.
+
+    Returns
+    -------
+    pd.Series
+        Monthly timestamps (month-start frequency), values in cumulative MW.
+        Timezone-aware as specified by tz.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the MaStR DB has not been downloaded yet.
+    """
+    if not _DB_PATH.exists() or _DB_PATH.stat().st_size == 0:
+        raise FileNotFoundError(
+            f"MaStR DB not found or empty at {_DB_PATH}. Run download_db() first."
+        )
+
+    engine = create_engine(f"sqlite:///{_DB_PATH}")
+    try:
+        df = pd.read_sql(
+            "SELECT Inbetriebnahmedatum, Nettonennleistung "
+            "FROM solar_extended "
+            "WHERE EinheitBetriebsstatus = 'In Betrieb'",
+            engine,
+        )
+    finally:
+        engine.dispose()
+
+    df["date"] = pd.to_datetime(df["Inbetriebnahmedatum"], errors="coerce")
+    df["mw"] = pd.to_numeric(df["Nettonennleistung"], errors="coerce") / 1000.0
+    df = df.dropna(subset=["date", "mw"])
+
+    monthly = (
+        df.set_index("date")["mw"]
+        .resample("MS")
+        .sum()
+        .cumsum()
+    )
+    monthly.index = monthly.index.tz_localize(tz)
+    return monthly.rename("capacity_mw")
+
+
 def get_k_centroids(df: pd.DataFrame, k: int = 5, random_state: int = 42) -> pd.DataFrame:
     """
     Cluster solar units into k representative grid points weighted by capacity.
