@@ -7,7 +7,7 @@ import numpy as np
 from retry_requests import retry
 from pathlib import Path
 
-CACHE_DIR = Path(__file__).parent / "data" / "nwp"
+CACHE_DIR = Path(__file__).parent.parent / "data" / "nwp"
 CACHE_DIR.mkdir(exist_ok=True, parents=True)
 
 NWP_VARIABLES = [

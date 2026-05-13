@@ -11,7 +11,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from retry_requests import retry
 
-_CACHE_DIR = Path(__file__).parent / "data" / "era5_cache"
+_CACHE_DIR = Path(__file__).parent.parent / "data" / "era5_cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 ENTSOE_URL = "https://web-api.tp.entsoe.eu/api"
