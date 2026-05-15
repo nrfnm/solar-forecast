@@ -11,6 +11,7 @@ from solar_forecast.ensemble import forecast_country
 from solar_forecast.fetch_actuals import fetch_entsoe
 from solar_forecast.evaluate import evaluate, print_summary
 from solar_forecast.calibrate import apply_spread_correction
+from solar_forecast.train import load_quantile_models
 
 _OUTPUT_DIR = Path(__file__).parent / "data" / "forecasts"
 
@@ -24,7 +25,7 @@ def run(
     save: bool = True,
 ) -> pd.DataFrame:
     """
-    Run the daily forecast pipeline.
+    Run the daily forecast pipeline using the quantile ensemble model.
 
     Uses config.CENTROIDS for spatial aggregation if set, otherwise falls
     back to the single point config.LAT / config.LON.
@@ -45,14 +46,18 @@ def run(
     Returns
     -------
     pd.DataFrame
-        Shape (timesteps, n_members) in MW.
+        Shape (timesteps, 100) in MW — 100 quantile trajectories.
     """
     run_date = run_date or str(date.today())
     n_centroids = len(config.CENTROIDS) if config.CENTROIDS else 1
     print(f"=== Pipeline run: {run_date} ({n_centroids} centroid(s)) ===")
 
-    print("Fetching NWP and running ensemble model...")
-    trajectories = forecast_country(forecast_days=forecast_days)
+    print("Loading quantile models...")
+    quantile_models = load_quantile_models()
+    print(f"  {len(quantile_models)} quantile models loaded")
+
+    print("Fetching NWP and running quantile ensemble...")
+    trajectories = forecast_country(quantile_models=quantile_models, forecast_days=forecast_days)
     print(f"  Output: {trajectories.shape[0]} timesteps × {trajectories.shape[1]} members")
 
     if spread_factor != 1.0:

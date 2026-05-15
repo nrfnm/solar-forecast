@@ -6,10 +6,10 @@ import lightgbm as lgb
 from pathlib import Path
 from typing import Optional
 
-from solar_forecast.clearsky import get_clearsky
+from solar_forecast.clearsky import get_clearsky, temperature_efficiency
 from solar_forecast.fetch_nwp import fetch_nwp
 from solar_forecast.features import build_features
-from solar_forecast.train import FEATURE_COLS, load_model
+from solar_forecast.train import FEATURE_COLS, QUANTILE_LEVELS, load_model, load_quantile_models
 import config
 
 _STC_IRRADIANCE = config.STC_IRRADIANCE
@@ -64,7 +64,7 @@ def run_ensemble(
         Nighttime rows are zero.
     """
     nwp_by_member = _pivot_nwp(nwp_raw)
-    clearsky_mw = (clearsky["poa_clearsky"] / stc_irradiance) * installed_capacity_mw
+    base_clearsky_mw = (clearsky["poa_clearsky"] / stc_irradiance) * installed_capacity_mw
 
     trajectories = {}
     for member_name, nwp_df in nwp_by_member.items():
@@ -75,8 +75,55 @@ def run_ensemble(
 
         feats = build_features(nwp_df, clearsky, member_id=member_id)
         ci_pred = model.predict(feats[FEATURE_COLS]).clip(0, 1.1)
-        mw = pd.Series(ci_pred, index=feats.index) * clearsky_mw
+
+        clearsky_mw = base_clearsky_mw.copy()
+        if "temperature_2m" in nwp_df.columns:
+            eta = temperature_efficiency(clearsky["poa_clearsky"], nwp_df["temperature_2m"])
+            clearsky_mw = clearsky_mw * eta
+
+        mw = pd.Series(ci_pred, index=feats.index) * clearsky_mw.reindex(feats.index)
         trajectories[member_name] = mw.where(clearsky["is_daytime"], 0.0)
+
+    return pd.DataFrame(trajectories)
+
+
+def run_quantile_ensemble(
+    models: list,
+    nwp_raw: dict[str, pd.DataFrame],
+    clearsky: pd.DataFrame,
+    installed_capacity_mw: float,
+    stc_irradiance: float = _STC_IRRADIANCE,
+) -> pd.DataFrame:
+    """
+    Apply N quantile CI models to produce N MW trajectories.
+
+    Iterates over models (not NWP members). When len(models) > n_nwp_members,
+    NWP members are cycled so each model gets a real weather input while still
+    spanning the full quantile range. With 100 models and 50 NWP members each
+    NWP member is used twice, paired with two different quantile levels.
+
+    Returns
+    -------
+    pd.DataFrame
+        Shape (timesteps, len(models)), columns member_000…member_N, values in MW.
+    """
+    nwp_by_member = list(_pivot_nwp(nwp_raw).values())
+    n_nwp = len(nwp_by_member)
+    base_clearsky_mw = (clearsky["poa_clearsky"] / stc_irradiance) * installed_capacity_mw
+
+    trajectories = {}
+    for i, model in enumerate(models):
+        nwp_df = nwp_by_member[i % n_nwp]
+        feats = build_features(nwp_df, clearsky, member_id=i)
+        ci_pred = model.predict(feats[FEATURE_COLS]).clip(0, 1.1)
+
+        clearsky_mw = base_clearsky_mw.copy()
+        if "temperature_2m" in nwp_df.columns:
+            eta = temperature_efficiency(clearsky["poa_clearsky"], nwp_df["temperature_2m"])
+            clearsky_mw = clearsky_mw * eta
+
+        mw = pd.Series(ci_pred, index=feats.index) * clearsky_mw.reindex(feats.index)
+        trajectories[f"member_{i:03d}"] = mw.where(clearsky["is_daytime"], 0.0)
 
     return pd.DataFrame(trajectories)
 
@@ -88,6 +135,7 @@ def forecast(
     forecast_days: int = 7,
     model: Optional[lgb.LGBMRegressor] = None,
     model_path: Optional[Path] = None,
+    quantile_models: Optional[list] = None,
     altitude: float = 500,
     surface_tilt: float = 30,
     surface_azimuth: float = 180,
@@ -116,9 +164,6 @@ def forecast(
     pd.DataFrame
         Shape (timesteps, n_members) in MW.
     """
-    if model is None:
-        model = load_model(model_path)
-
     nwp_raw = fetch_nwp(lat, lon, forecast_days=forecast_days, model=nwp_model)
     times = nwp_raw[next(iter(nwp_raw))].index
     clearsky = get_clearsky(
@@ -128,12 +173,18 @@ def forecast(
         surface_azimuth=surface_azimuth,
     )
 
+    if quantile_models is not None:
+        return run_quantile_ensemble(quantile_models, nwp_raw, clearsky, installed_capacity_mw)
+
+    if model is None:
+        model = load_model(model_path)
     return run_ensemble(model, nwp_raw, clearsky, installed_capacity_mw)
 
 
 def forecast_country(
     model: Optional[lgb.LGBMRegressor] = None,
     model_path: Optional[Path] = None,
+    quantile_models: Optional[list] = None,
     forecast_days: int = config.FORECAST_DAYS,
     nwp_model: str = "ecmwf_ifs025",
 ) -> pd.DataFrame:
@@ -151,7 +202,7 @@ def forecast_country(
     pd.DataFrame
         Shape (timesteps, n_members) in MW.
     """
-    if model is None:
+    if quantile_models is None and model is None:
         model = load_model(model_path)
 
     if not config.CENTROIDS:
@@ -161,23 +212,91 @@ def forecast_country(
             installed_capacity_mw=config.CAPACITY_MW,
             forecast_days=forecast_days,
             model=model,
+            quantile_models=quantile_models,
             nwp_model=nwp_model,
         )
 
     total: Optional[pd.DataFrame] = None
     for i, c in enumerate(config.CENTROIDS):
-        print(f"  Centroid {i+1}/{len(config.CENTROIDS)}: lat={c['lat']}, lon={c['lon']}, weight={c['weight']:.3f}")
+        print(f"Centroid {i + 1}/{len(config.CENTROIDS)}: lat={c['lat']:.4f}, lon={c['lon']:.4f}, weight={c['weight']:.3f}")
         traj = forecast(
             lat=c["lat"],
             lon=c["lon"],
             installed_capacity_mw=config.CAPACITY_MW * c["weight"],
             forecast_days=forecast_days,
             model=model,
+            quantile_models=quantile_models,
             nwp_model=nwp_model,
         )
         total = traj if total is None else total + traj
 
     return total
+
+
+def backtest(
+    start: str,
+    end: str,
+    lat: float = config.LAT,
+    lon: float = config.LON,
+    installed_capacity_mw: float = config.CAPACITY_MW,
+    area: str = config.AREA,
+    tz: str = config.TZ,
+    altitude: float = config.ALTITUDE,
+    surface_tilt: float = config.SURFACE_TILT,
+    surface_azimuth: float = config.SURFACE_AZIMUTH,
+    n_members: int = 50,
+    model: Optional[lgb.LGBMRegressor] = None,
+    model_path: Optional[Path] = None,
+    use_quantile: bool = False,
+    quantile_models: Optional[list] = None,
+    entsoe_api_key: Optional[str] = None,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """
+    Run a historical backtest using ERA5 reanalysis as pseudo-NWP input.
+
+    ERA5 is broadcast into n_members identical copies. With use_quantile=True,
+    member i is run through quantile model i, giving proper probabilistic spread
+    from quantile regression rather than member_id feature variation.
+
+    Returns
+    -------
+    trajectories : pd.DataFrame
+        Shape (timesteps, n_members) in MW.
+    actuals : pd.Series
+        ENTSO-E solar generation in MW, aligned to trajectories index.
+    """
+    import os
+    from solar_forecast.fetch_actuals import fetch_era5, fetch_entsoe
+
+    era5 = fetch_era5(lat, lon, start, end, tz=tz)
+    clearsky = get_clearsky(
+        lat, lon, era5.index,
+        altitude=altitude,
+        surface_tilt=surface_tilt,
+        surface_azimuth=surface_azimuth,
+    )
+
+    nwp_raw = {
+        var: pd.DataFrame(
+            {f"member_{m:02d}": era5[var] for m in range(n_members)},
+        )
+        for var in era5.columns
+    }
+
+    if use_quantile:
+        if quantile_models is None:
+            quantile_models = load_quantile_models()
+        trajectories = run_quantile_ensemble(quantile_models, nwp_raw, clearsky, installed_capacity_mw)
+    else:
+        if model is None:
+            model = load_model(model_path)
+        trajectories = run_ensemble(model, nwp_raw, clearsky, installed_capacity_mw)
+
+    token = entsoe_api_key or os.environ.get("ENTSOE_API_KEY")
+    actuals = fetch_entsoe(area, start, end, api_key=token)
+    actuals = actuals.tz_convert(tz).reindex(trajectories.index)
+
+    return trajectories, actuals
 
 
 if __name__ == "__main__":

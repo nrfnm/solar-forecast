@@ -94,7 +94,7 @@ def evaluate(
         crps_mean        — lower is better
         crps_skill       — positive = better than climatology
         pit_bias         — positive = model overforecasts
-        dispersion_ratio — >1 overdispersed, <1 underdispersed, 1.0 = perfect
+        dispersion_ratio — >1 underdispersed (too narrow), <1 overdispersed (too wide), 1.0 = perfect
     """
     if daytime_only:
         is_day = forecasts.max(axis=1) > 0

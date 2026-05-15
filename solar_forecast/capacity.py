@@ -157,7 +157,12 @@ if __name__ == "__main__":
     download_db(force=args.force_download)
     df = clean_db()
     centroids = get_k_centroids(df, k=args.k)
-    print(centroids.to_string(index=False))
+
+    print("# Paste into config.py:")
+    print("CENTROIDS = [")
+    for _, row in centroids.iterrows():
+        print(f'    {{"lat": {row["lat"]:.4f}, "lon": {row["lon"]:.4f}, "weight": {row["weight"]:.4f}}},')
+    print("]")
 
 
 

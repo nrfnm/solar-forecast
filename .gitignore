@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project-specific
+logs/
+data/processed/
+data/raw/
+data/nwp/
+models/*.pkl
+models/*.json
+docs/session_*.md

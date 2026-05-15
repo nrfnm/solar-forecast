@@ -2,6 +2,7 @@
 """Fetch historical training data: ERA5 reanalysis inputs + ENTSO-E solar generation targets."""
 
 import os
+import time
 import requests
 import openmeteo_requests
 import requests_cache
@@ -10,6 +11,8 @@ import numpy as np
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from retry_requests import retry
+
+_RATE_LIMIT_WAIT = 65  # seconds to wait after hitting Open-Meteo per-minute rate limit
 
 _CACHE_DIR = Path(__file__).parent.parent / "data" / "era5_cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -33,8 +36,26 @@ def _get_om_client() -> openmeteo_requests.Client:
     cache_session = requests_cache.CachedSession(
         _CACHE_DIR / ".era5_cache", expire_after=-1  # historical data doesn't change
     )
-    retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+    # Only retries HTTP-level errors (4xx/5xx); application-level rate limits (200 + error JSON)
+    # are handled by the _rate_limited_weather_api wrapper below.
+    retry_session = retry(cache_session, retries=3, backoff_factor=1.0)
     return openmeteo_requests.Client(session=retry_session)
+
+
+def _rate_limited_weather_api(client, url: str, params: dict, max_retries: int = 5) -> list:
+    """Call client.weather_api with automatic retry on Open-Meteo rate-limit responses."""
+    for attempt in range(max_retries):
+        try:
+            return client.weather_api(url, params=params)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "rate" in msg or "limit exceeded" in msg or "429" in msg:
+                wait = _RATE_LIMIT_WAIT * (attempt + 1)
+                print(f"Open-Meteo rate limit hit (attempt {attempt + 1}/{max_retries}) — waiting {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
+    raise RuntimeError(f"Open-Meteo rate limit not cleared after {max_retries} retries")
 
 
 def fetch_era5(
@@ -63,7 +84,8 @@ def fetch_era5(
         temperature_2m. Index is timezone-aware. Compatible with build_features(member_id=-1).
     """
     client = _get_om_client()
-    responses = client.weather_api(
+    responses = _rate_limited_weather_api(
+        client,
         "https://archive-api.open-meteo.com/v1/archive",
         params={
             "latitude": lat,

@@ -4,6 +4,44 @@
 import pandas as pd
 import pvlib
 from pvlib.irradiance import get_total_irradiance
+from pvlib.temperature import faiman
+
+
+def temperature_efficiency(
+    poa: pd.Series,
+    temperature_2m: pd.Series,
+    gamma: float = -0.0040,
+) -> pd.Series:
+    """
+    Panel efficiency factor relative to STC due to cell temperature.
+
+    Cell temperature is estimated with the Faiman model (no wind speed needed):
+        T_cell = T_air + POA / U0,  U0=25 W/(m²·K)
+
+    Efficiency factor:
+        η = 1 + γ × (T_cell − 25°C),  γ = −0.0040 /°C (mono-Si typical)
+
+    At 60°C cell temp this gives η ≈ 0.86 (14% loss), consistent with real
+    panel datasheets. Applied to clearsky_mw so CI targets and predictions
+    are temperature-corrected and the model doesn't need to absorb this
+    systematic effect through the temperature_2m feature.
+
+    Parameters
+    ----------
+    poa : pd.Series
+        Plane-of-array irradiance in W/m².
+    temperature_2m : pd.Series
+        Ambient 2m temperature in °C, aligned to poa index.
+    gamma : float
+        Temperature coefficient in /°C. Negative for all silicon panels.
+
+    Returns
+    -------
+    pd.Series
+        Efficiency factor, clipped to [0.5, 1.05].
+    """
+    t_cell = faiman(poa, temperature_2m)
+    return (1.0 + gamma * (t_cell - 25.0)).clip(lower=0.5, upper=1.05)
 
 
 def get_clearsky(
