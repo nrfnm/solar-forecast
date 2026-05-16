@@ -30,7 +30,7 @@ CAPACITY_MW = 120_000.0
 STC_IRRADIANCE = 1000.0  # W/m² — irradiance at which panels produce rated capacity
 
 # --- Forecast ---
-FORECAST_DAYS = 1
+FORECAST_DAYS = 2
 
 # --- Spatial centroids ---
 # Capacity-weighted grid points derived from MaStR k-means clustering.
