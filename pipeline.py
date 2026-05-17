@@ -4,7 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 import config
@@ -45,7 +45,9 @@ def run(
     pd.DataFrame
         Shape (timesteps, 100) in MW — 100 quantile trajectories, calibrated.
     """
-    run_date = run_date or str(date.today())
+    # run_date is the TARGET date (day being forecast/evaluated).
+    # Default to tomorrow so the daily production run always targets the next day.
+    run_date = run_date or str(date.today() + timedelta(days=1))
     n_centroids = len(config.CENTROIDS) if config.CENTROIDS else 1
     print(f"=== Pipeline run: {run_date} ({n_centroids} centroid(s)) ===")
 
@@ -60,10 +62,9 @@ def run(
     print("  Applying calibration...")
     trajectories = apply_spread_correction(trajectories)
 
-    # Select target day (run_date+1) and resample hourly → 15-min.
-    # The competition expects 96 timesteps at 15-min resolution covering one calendar day.
+    # run_date IS the target date — select it directly from the NWP trajectories.
     tz = trajectories.index.tz
-    target_start_ts = (pd.Timestamp(run_date) + pd.Timedelta(days=1)).tz_localize(tz)
+    target_start_ts = pd.Timestamp(run_date).tz_localize(tz)
     day_mask = (trajectories.index >= target_start_ts) & (
         trajectories.index < target_start_ts + pd.Timedelta(hours=24)
     )
@@ -118,7 +119,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Run daily solar forecast pipeline.")
-    parser.add_argument("--date", default=None, help="Run date YYYY-MM-DD (default: today)")
+    parser.add_argument("--date", default=None, help="Target date YYYY-MM-DD (default: tomorrow)")
     parser.add_argument("--days", type=int, default=config.FORECAST_DAYS)
     parser.add_argument("--evaluate", action="store_true",
                         help="Fetch actuals and compute CRPS + PIT (past dates only)")
