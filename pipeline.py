@@ -19,7 +19,6 @@ _OUTPUT_DIR = Path(__file__).parent / "data" / "forecasts"
 def run(
     run_date: Optional[str] = None,
     forecast_days: int = config.FORECAST_DAYS,
-    spread_factor: float = 1.0,
     entsoe_api_key: Optional[str] = None,
     evaluate_actuals: bool = False,
     save: bool = True,
@@ -34,9 +33,6 @@ def run(
     ----------
     run_date : str, optional
         ISO date string (YYYY-MM-DD). Defaults to today.
-    spread_factor : float
-        Multiplicative spread correction. Use 1.0 (no correction) until
-        calibrate.py has been run on a validation period to estimate it.
     evaluate_actuals : bool
         If True, fetch ENTSO-E actuals for the forecast window and print
         CRPS + PIT metrics. Only meaningful for past dates.
@@ -46,7 +42,7 @@ def run(
     Returns
     -------
     pd.DataFrame
-        Shape (timesteps, 100) in MW — 100 quantile trajectories.
+        Shape (timesteps, 100) in MW — 100 quantile trajectories, calibrated.
     """
     run_date = run_date or str(date.today())
     n_centroids = len(config.CENTROIDS) if config.CENTROIDS else 1
@@ -60,9 +56,8 @@ def run(
     trajectories = forecast_country(quantile_models=quantile_models, forecast_days=forecast_days)
     print(f"  Output: {trajectories.shape[0]} timesteps × {trajectories.shape[1]} members")
 
-    if spread_factor != 1.0:
-        print(f"  Applying spread correction (factor={spread_factor:.3f})...")
-        trajectories = apply_spread_correction(trajectories, spread_factor)
+    print("  Applying calibration...")
+    trajectories = apply_spread_correction(trajectories)
 
     if evaluate_actuals and pd.Timestamp(run_date) >= pd.Timestamp.now().normalize():
         print("  Skipping evaluation — run_date is not in the past.")
@@ -97,8 +92,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run daily solar forecast pipeline.")
     parser.add_argument("--date", default=None, help="Run date YYYY-MM-DD (default: today)")
     parser.add_argument("--days", type=int, default=config.FORECAST_DAYS)
-    parser.add_argument("--spread-factor", type=float, default=1.0,
-                        help="Spread correction factor (default: 1.0 = no correction)")
     parser.add_argument("--evaluate", action="store_true",
                         help="Fetch actuals and compute CRPS + PIT (past dates only)")
     parser.add_argument("--no-save", action="store_true")
@@ -107,7 +100,6 @@ if __name__ == "__main__":
     run(
         run_date=args.date,
         forecast_days=args.days,
-        spread_factor=args.spread_factor,
         entsoe_api_key=os.environ.get("ENTSOE_API_KEY"),
         evaluate_actuals=args.evaluate,
         save=not args.no_save,
