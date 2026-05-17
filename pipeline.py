@@ -60,10 +60,10 @@ def run(
     print("  Applying calibration...")
     trajectories = apply_spread_correction(trajectories)
 
-    # Select target day (day+1 of forecast start) and resample hourly → 15-min.
+    # Select target day (run_date+1) and resample hourly → 15-min.
     # The competition expects 96 timesteps at 15-min resolution covering one calendar day.
-    forecast_start = trajectories.index[0].normalize()
-    target_start_ts = forecast_start + pd.Timedelta(hours=24)
+    tz = trajectories.index.tz
+    target_start_ts = (pd.Timestamp(run_date) + pd.Timedelta(days=1)).tz_localize(tz)
     day_mask = (trajectories.index >= target_start_ts) & (
         trajectories.index < target_start_ts + pd.Timedelta(hours=24)
     )
@@ -87,8 +87,8 @@ def run(
         f"(15-min, target {target_start_ts.date()})"
     )
 
-    if evaluate_actuals and target_start_ts >= pd.Timestamp.now(tz=target_start_ts.tzinfo):
-        print("  Skipping evaluation — target day is not yet in the past.")
+    if evaluate_actuals and target_start_ts + pd.Timedelta(hours=24) > pd.Timestamp.now(tz=tz):
+        print("  Skipping evaluation — target day has not fully elapsed.")
         evaluate_actuals = False
 
     if evaluate_actuals:
