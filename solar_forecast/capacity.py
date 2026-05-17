@@ -8,6 +8,7 @@ from sklearn.cluster import KMeans
 import pandas as pd
 
 _DB_PATH = Path(__file__).parent.parent/"open-mastr" / "data" / "MaStR_DB.sqlite"
+_CSV_PATH = Path(__file__).parent.parent / "data" / "capacity_timeseries.csv"
 _PLZ_CSV = Path(__file__).parent.parent / "data" / "plz_geocoord.csv"
 _REQUIRED_COLS = [
         "EinheitMastrNummer",
@@ -88,34 +89,40 @@ def capacity_timeseries(tz: str = "UTC") -> pd.Series:
     FileNotFoundError
         If the MaStR DB has not been downloaded yet.
     """
-    if not _DB_PATH.exists() or _DB_PATH.stat().st_size == 0:
-        raise FileNotFoundError(
-            f"MaStR DB not found or empty at {_DB_PATH}. Run download_db() first."
+    if _DB_PATH.exists() and _DB_PATH.stat().st_size > 0:
+        engine = create_engine(f"sqlite:///{_DB_PATH}")
+        try:
+            df = pd.read_sql(
+                "SELECT Inbetriebnahmedatum, Nettonennleistung "
+                "FROM solar_extended "
+                "WHERE EinheitBetriebsstatus = 'In Betrieb'",
+                engine,
+            )
+        finally:
+            engine.dispose()
+
+        df["date"] = pd.to_datetime(df["Inbetriebnahmedatum"], errors="coerce")
+        df["mw"] = pd.to_numeric(df["Nettonennleistung"], errors="coerce") / 1000.0
+        df = df.dropna(subset=["date", "mw"])
+
+        monthly = (
+            df.set_index("date")["mw"]
+            .resample("MS")
+            .sum()
+            .cumsum()
         )
+        monthly.index = monthly.index.tz_localize(tz)
+        return monthly.rename("capacity_mw")
 
-    engine = create_engine(f"sqlite:///{_DB_PATH}")
-    try:
-        df = pd.read_sql(
-            "SELECT Inbetriebnahmedatum, Nettonennleistung "
-            "FROM solar_extended "
-            "WHERE EinheitBetriebsstatus = 'In Betrieb'",
-            engine,
-        )
-    finally:
-        engine.dispose()
+    if _CSV_PATH.exists():
+        s = pd.read_csv(_CSV_PATH, index_col=0, parse_dates=True).iloc[:, 0]
+        s.index = s.index.tz_convert(tz) if s.index.tz is not None else s.index.tz_localize(tz)
+        return s.rename("capacity_mw")
 
-    df["date"] = pd.to_datetime(df["Inbetriebnahmedatum"], errors="coerce")
-    df["mw"] = pd.to_numeric(df["Nettonennleistung"], errors="coerce") / 1000.0
-    df = df.dropna(subset=["date", "mw"])
-
-    monthly = (
-        df.set_index("date")["mw"]
-        .resample("MS")
-        .sum()
-        .cumsum()
+    raise FileNotFoundError(
+        f"Neither MaStR DB ({_DB_PATH}) nor capacity CSV ({_CSV_PATH}) found. "
+        "Run download_db() or provide the CSV."
     )
-    monthly.index = monthly.index.tz_localize(tz)
-    return monthly.rename("capacity_mw")
 
 
 def get_k_centroids(df: pd.DataFrame, k: int = 5, random_state: int = 42) -> pd.DataFrame:
