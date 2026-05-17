@@ -87,8 +87,9 @@ def run(
         f"(15-min, target {target_start_ts.date()})"
     )
 
-    if evaluate_actuals and target_start_ts + pd.Timedelta(hours=24) > pd.Timestamp.now(tz=tz):
-        print("  Skipping evaluation — target day has not fully elapsed.")
+    today_in_tz = pd.Timestamp.now(tz=tz).date()
+    if evaluate_actuals and target_start_ts.date() >= today_in_tz:
+        print("  Skipping evaluation — target day has not yet passed.")
         evaluate_actuals = False
 
     if evaluate_actuals:
