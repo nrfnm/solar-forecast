@@ -34,6 +34,13 @@ def fit(
     obs_vals = obs_aligned.values
     fct_vals = fct_aligned.values
 
+    valid = ~np.isnan(obs_vals)
+    obs_vals = obs_vals[valid]
+    fct_vals = fct_vals[valid]
+
+    if len(obs_vals) == 0:
+        raise ValueError("No valid (non-NaN) observations after alignment — check actuals data.")
+
     # Step 1: estimate bias from mean ratio
     ensemble_mean = fct_vals.mean(axis=1)
     bias_factor = float(obs_vals.mean() / ensemble_mean.mean()) if ensemble_mean.mean() > 0 else 1.0
