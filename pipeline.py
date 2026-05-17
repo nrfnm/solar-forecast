@@ -68,7 +68,15 @@ def run(
         trajectories.index < target_start_ts + pd.Timedelta(hours=24)
     )
     target_day = trajectories[day_mask]
-    resampled = target_day.resample("15min").interpolate("linear")
+    # Force exactly 96 15-min slots (00:00–23:45). Interpolate between hourly points
+    # and forward-fill the tail (23:15–23:45) from the last hourly value.
+    target_index = pd.date_range(target_start_ts, periods=96, freq="15min", tz=trajectories.index.tz)
+    resampled = (
+        target_day.resample("15min").asfreq()
+        .reindex(target_index)
+        .interpolate("linear")
+        .ffill()
+    )
     submission = pd.DataFrame(
         np.clip(resampled.values, 0, None),
         index=resampled.index,
