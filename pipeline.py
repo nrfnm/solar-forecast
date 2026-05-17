@@ -1,6 +1,7 @@
 """Daily forecast pipeline: fetch NWP → ensemble → (calibrate) → (evaluate) → save."""
 
 import os
+import numpy as np
 import pandas as pd
 from pathlib import Path
 from datetime import date
@@ -59,8 +60,27 @@ def run(
     print("  Applying calibration...")
     trajectories = apply_spread_correction(trajectories)
 
-    if evaluate_actuals and pd.Timestamp(run_date) >= pd.Timestamp.now().normalize():
-        print("  Skipping evaluation — run_date is not in the past.")
+    # Select target day (day+1 of forecast start) and resample hourly → 15-min.
+    # The competition expects 96 timesteps at 15-min resolution covering one calendar day.
+    forecast_start = trajectories.index[0].normalize()
+    target_start_ts = forecast_start + pd.Timedelta(hours=24)
+    day_mask = (trajectories.index >= target_start_ts) & (
+        trajectories.index < target_start_ts + pd.Timedelta(hours=24)
+    )
+    target_day = trajectories[day_mask]
+    resampled = target_day.resample("15min").interpolate("linear")
+    submission = pd.DataFrame(
+        np.clip(resampled.values, 0, None),
+        index=resampled.index,
+        columns=target_day.columns,
+    )
+    print(
+        f"  Submission format: {len(submission)} timesteps × {submission.shape[1]} scenarios "
+        f"(15-min, target {target_start_ts.date()})"
+    )
+
+    if evaluate_actuals and target_start_ts >= pd.Timestamp.now(tz=target_start_ts.tzinfo):
+        print("  Skipping evaluation — target day is not yet in the past.")
         evaluate_actuals = False
 
     if evaluate_actuals:
@@ -68,22 +88,21 @@ def run(
         if not token:
             print("  Skipping evaluation — ENTSOE_API_KEY not set.")
         else:
-            start = str(trajectories.index[0].date())
-            end = str(trajectories.index[-1].date())
-            print(f"  Fetching actuals ({start} → {end})...")
-            actuals = fetch_entsoe(config.AREA, start, end, api_key=token)
-            actuals = actuals.tz_convert(trajectories.index.tz).reindex(trajectories.index)
-            metrics = evaluate(actuals, trajectories)
+            target_date_str = str(target_start_ts.date())
+            print(f"  Fetching actuals for target day ({target_date_str})...")
+            actuals = fetch_entsoe(config.AREA, target_date_str, target_date_str, api_key=token)
+            actuals = actuals.tz_convert(submission.index.tz).reindex(submission.index)
+            metrics = evaluate(actuals, submission)
             print("\n  Evaluation:")
             print_summary(metrics)
 
     if save:
         _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         out_path = _OUTPUT_DIR / f"{run_date}.parquet"
-        trajectories.to_parquet(out_path)
+        submission.to_parquet(out_path)
         print(f"\n  Saved → {out_path}")
 
-    return trajectories
+    return submission
 
 
 if __name__ == "__main__":
