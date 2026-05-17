@@ -19,7 +19,7 @@ import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from solar_forecast.ensemble import backtest
-from solar_forecast.calibrate import fit as fit_calibration, apply as apply_calibration
+from solar_forecast.calibrate import fit as fit_calibration, apply_spread_correction as apply_calibration
 from solar_forecast.evaluate import evaluate, print_summary
 
 
@@ -34,7 +34,7 @@ def run(start, end, mode, save):
         print_summary(metrics)
 
         print("\nCalibrated:")
-        params = fit_calibration(actuals, traj, save_path=None)
+        params = fit_calibration(actuals, traj)
         traj_cal = apply_calibration(traj, params)
         print_summary(evaluate(actuals, traj_cal))
 
@@ -48,7 +48,7 @@ def run(start, end, mode, save):
         print_summary(metrics_q)
 
         print("\nCalibrated:")
-        params_q = fit_calibration(actuals, traj_q, save_path=None)
+        params_q = fit_calibration(actuals, traj_q)
         traj_q_cal = apply_calibration(traj_q, params_q)
         print_summary(evaluate(actuals, traj_q_cal))
 
