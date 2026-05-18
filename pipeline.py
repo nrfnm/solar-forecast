@@ -11,7 +11,7 @@ import config
 from solar_forecast.ensemble import forecast_country
 from solar_forecast.fetch_actuals import fetch_entsoe
 from solar_forecast.evaluate import evaluate, print_summary
-from solar_forecast.calibrate import apply_spread_correction
+from solar_forecast.calibrate import apply_emos
 from solar_forecast.train import load_quantile_models
 
 _OUTPUT_DIR = Path(__file__).parent / "data" / "forecasts"
@@ -60,7 +60,7 @@ def run(
     print(f"  Output: {trajectories.shape[0]} timesteps × {trajectories.shape[1]} members")
 
     print("  Applying calibration...")
-    trajectories = apply_spread_correction(trajectories)
+    trajectories = apply_emos(trajectories)
 
     # run_date IS the target date — select it directly from the NWP trajectories.
     tz = trajectories.index.tz

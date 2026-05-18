@@ -11,6 +11,7 @@ dependencies = [
     "pvlib>=0.10",
     "lightgbm>=4.0",
     "properscoring>=0.1",
+    "scipy>=1.10",
     # Data wrangling
     "pandas>=2.0",
     "numpy>=1.26",
