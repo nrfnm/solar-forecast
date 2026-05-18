@@ -38,6 +38,7 @@ def run_ensemble(
     model: lgb.LGBMRegressor,
     nwp_raw: dict[str, pd.DataFrame],
     clearsky: pd.DataFrame,
+    clearsky_15min: pd.DataFrame,
     installed_capacity_mw: float,
     stc_irradiance: float = _STC_IRRADIANCE,
 ) -> pd.DataFrame:
@@ -51,7 +52,9 @@ def run_ensemble(
     nwp_raw : dict[str, pd.DataFrame]
         Output of fetch_nwp() — {variable: DataFrame(times × members)}.
     clearsky : pd.DataFrame
-        Output of get_clearsky() for the same location and time range.
+        Hourly clearsky (for feature engineering).
+    clearsky_15min : pd.DataFrame
+        15-min clearsky (for physics-based intra-hour ramp scaling).
     installed_capacity_mw : float
         Total installed solar capacity used to scale CI → MW.
     stc_irradiance : float
@@ -60,11 +63,11 @@ def run_ensemble(
     Returns
     -------
     pd.DataFrame
-        Shape (timesteps, n_members), columns member_00…member_N, values in MW.
+        Shape (timesteps_15min, n_members), columns member_00…member_N, values in MW.
         Nighttime rows are zero.
     """
     nwp_by_member = _pivot_nwp(nwp_raw)
-    base_clearsky_mw = (clearsky["poa_clearsky"] / stc_irradiance) * installed_capacity_mw
+    base_clearsky_mw_15min = (clearsky_15min["poa_clearsky"] / stc_irradiance) * installed_capacity_mw
 
     trajectories = {}
     for member_name, nwp_df in nwp_by_member.items():
@@ -74,15 +77,30 @@ def run_ensemble(
             member_id = -1
 
         feats = build_features(nwp_df, clearsky, member_id=member_id)
-        ci_pred = model.predict(feats[FEATURE_COLS]).clip(0, 1.1)
+        ci_hourly = pd.Series(
+            model.predict(feats[FEATURE_COLS]).clip(0, 1.1), index=feats.index
+        )
+        ci_15min = (
+            ci_hourly.resample("15min").asfreq()
+            .reindex(clearsky_15min.index)
+            .interpolate("linear")
+            .ffill().bfill()
+            .clip(0, 1.1)
+        )
 
-        clearsky_mw = base_clearsky_mw.copy()
+        clearsky_mw_15min = base_clearsky_mw_15min.copy()
         if "temperature_2m" in nwp_df.columns:
-            eta = temperature_efficiency(clearsky["poa_clearsky"], nwp_df["temperature_2m"])
-            clearsky_mw = clearsky_mw * eta
+            eta_15min = (
+                temperature_efficiency(clearsky["poa_clearsky"], nwp_df["temperature_2m"])
+                .resample("15min").asfreq()
+                .reindex(clearsky_15min.index)
+                .interpolate("linear")
+                .ffill().bfill()
+            )
+            clearsky_mw_15min = clearsky_mw_15min * eta_15min
 
-        mw = pd.Series(ci_pred, index=feats.index) * clearsky_mw.reindex(feats.index)
-        trajectories[member_name] = mw.where(clearsky["is_daytime"], 0.0)
+        mw = ci_15min * clearsky_mw_15min
+        trajectories[member_name] = mw.where(clearsky_15min["is_daytime"], 0.0)
 
     return pd.DataFrame(trajectories)
 
@@ -91,6 +109,7 @@ def run_quantile_ensemble(
     models: list,
     nwp_raw: dict[str, pd.DataFrame],
     clearsky: pd.DataFrame,
+    clearsky_15min: pd.DataFrame,
     installed_capacity_mw: float,
     stc_irradiance: float = _STC_IRRADIANCE,
 ) -> pd.DataFrame:
@@ -105,25 +124,40 @@ def run_quantile_ensemble(
     Returns
     -------
     pd.DataFrame
-        Shape (timesteps, len(models)), columns member_000…member_N, values in MW.
+        Shape (timesteps_15min, len(models)), columns member_000…member_N, values in MW.
     """
     nwp_by_member = list(_pivot_nwp(nwp_raw).values())
     n_nwp = len(nwp_by_member)
-    base_clearsky_mw = (clearsky["poa_clearsky"] / stc_irradiance) * installed_capacity_mw
+    base_clearsky_mw_15min = (clearsky_15min["poa_clearsky"] / stc_irradiance) * installed_capacity_mw
 
     trajectories = {}
     for i, model in enumerate(models):
         nwp_df = nwp_by_member[i % n_nwp]
         feats = build_features(nwp_df, clearsky, member_id=i)
-        ci_pred = model.predict(feats[FEATURE_COLS]).clip(0, 1.1)
+        ci_hourly = pd.Series(
+            model.predict(feats[FEATURE_COLS]).clip(0, 1.1), index=feats.index
+        )
+        ci_15min = (
+            ci_hourly.resample("15min").asfreq()
+            .reindex(clearsky_15min.index)
+            .interpolate("linear")
+            .ffill().bfill()
+            .clip(0, 1.1)
+        )
 
-        clearsky_mw = base_clearsky_mw.copy()
+        clearsky_mw_15min = base_clearsky_mw_15min.copy()
         if "temperature_2m" in nwp_df.columns:
-            eta = temperature_efficiency(clearsky["poa_clearsky"], nwp_df["temperature_2m"])
-            clearsky_mw = clearsky_mw * eta
+            eta_15min = (
+                temperature_efficiency(clearsky["poa_clearsky"], nwp_df["temperature_2m"])
+                .resample("15min").asfreq()
+                .reindex(clearsky_15min.index)
+                .interpolate("linear")
+                .ffill().bfill()
+            )
+            clearsky_mw_15min = clearsky_mw_15min * eta_15min
 
-        mw = pd.Series(ci_pred, index=feats.index) * clearsky_mw.reindex(feats.index)
-        trajectories[f"member_{i:03d}"] = mw.where(clearsky["is_daytime"], 0.0)
+        mw = ci_15min * clearsky_mw_15min
+        trajectories[f"member_{i:03d}"] = mw.where(clearsky_15min["is_daytime"], 0.0)
 
     return pd.DataFrame(trajectories)
 
@@ -172,13 +206,25 @@ def forecast(
         surface_tilt=surface_tilt,
         surface_azimuth=surface_azimuth,
     )
+    times_15min = pd.date_range(
+        start=times[0],
+        end=times[-1] + pd.Timedelta(minutes=45),
+        freq="15min",
+        tz=times.tz,
+    )
+    clearsky_15min = get_clearsky(
+        lat, lon, times_15min,
+        altitude=altitude,
+        surface_tilt=surface_tilt,
+        surface_azimuth=surface_azimuth,
+    )
 
     if quantile_models is not None:
-        return run_quantile_ensemble(quantile_models, nwp_raw, clearsky, installed_capacity_mw)
+        return run_quantile_ensemble(quantile_models, nwp_raw, clearsky, clearsky_15min, installed_capacity_mw)
 
     if model is None:
         model = load_model(model_path)
-    return run_ensemble(model, nwp_raw, clearsky, installed_capacity_mw)
+    return run_ensemble(model, nwp_raw, clearsky, clearsky_15min, installed_capacity_mw)
 
 
 def forecast_country(
@@ -275,6 +321,18 @@ def backtest(
         surface_tilt=surface_tilt,
         surface_azimuth=surface_azimuth,
     )
+    times_15min = pd.date_range(
+        start=era5.index[0],
+        end=era5.index[-1] + pd.Timedelta(minutes=45),
+        freq="15min",
+        tz=era5.index.tz,
+    )
+    clearsky_15min = get_clearsky(
+        lat, lon, times_15min,
+        altitude=altitude,
+        surface_tilt=surface_tilt,
+        surface_azimuth=surface_azimuth,
+    )
 
     nwp_raw = {
         var: pd.DataFrame(
@@ -286,15 +344,15 @@ def backtest(
     if use_quantile:
         if quantile_models is None:
             quantile_models = load_quantile_models()
-        trajectories = run_quantile_ensemble(quantile_models, nwp_raw, clearsky, installed_capacity_mw)
+        trajectories = run_quantile_ensemble(quantile_models, nwp_raw, clearsky, clearsky_15min, installed_capacity_mw)
     else:
         if model is None:
             model = load_model(model_path)
-        trajectories = run_ensemble(model, nwp_raw, clearsky, installed_capacity_mw)
+        trajectories = run_ensemble(model, nwp_raw, clearsky, clearsky_15min, installed_capacity_mw)
 
     token = entsoe_api_key or os.environ.get("ENTSOE_API_KEY")
     actuals = fetch_entsoe(area, start, end, api_key=token)
-    actuals = actuals.tz_convert(tz).reindex(trajectories.index)
+    actuals = actuals.tz_convert(tz).reindex(trajectories.index, method="ffill")
 
     return trajectories, actuals
 
