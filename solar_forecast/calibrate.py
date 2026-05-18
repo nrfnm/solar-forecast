@@ -123,13 +123,18 @@ if __name__ == "__main__":
     parser.add_argument("--forecast", required=True, help="Path to backtest .parquet file")
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
-    parser.add_argument("--area", default="DE")
+    parser.add_argument("--area", default="DE", help="ENTSO-E area (only used with --no-smard)")
+    parser.add_argument("--no-smard", dest="use_smard", action="store_false", default=True,
+                        help="Use ENTSO-E hourly actuals instead of SMARD 15-min (requires ENTSOE_API_KEY)")
     args = parser.parse_args()
 
-    from solar_forecast.fetch_actuals import fetch_entsoe
+    from solar_forecast.fetch_actuals import fetch_entsoe, fetch_smard
 
     forecasts = pd.read_parquet(args.forecast)
-    actuals = fetch_entsoe(args.area, args.start, args.end, api_key=os.environ.get("ENTSOE_API_KEY"))
+    if args.use_smard:
+        actuals = fetch_smard(args.start, args.end)
+    else:
+        actuals = fetch_entsoe(args.area, args.start, args.end, api_key=os.environ.get("ENTSOE_API_KEY"))
     actuals = actuals.tz_convert(forecasts.index.tz).reindex(forecasts.index)
 
     params = fit(actuals, forecasts)

@@ -296,6 +296,7 @@ def backtest(
     use_quantile: bool = False,
     quantile_models: Optional[list] = None,
     entsoe_api_key: Optional[str] = None,
+    use_smard: bool = True,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """
     Run a historical backtest using ERA5 reanalysis as pseudo-NWP input.
@@ -309,10 +310,11 @@ def backtest(
     trajectories : pd.DataFrame
         Shape (timesteps, n_members) in MW.
     actuals : pd.Series
-        ENTSO-E solar generation in MW, aligned to trajectories index.
+        Solar generation in MW, aligned to trajectories index.
+        15-min SMARD actuals by default; pass use_smard=False for hourly ENTSO-E.
     """
     import os
-    from solar_forecast.fetch_actuals import fetch_era5, fetch_entsoe
+    from solar_forecast.fetch_actuals import fetch_era5, fetch_entsoe, fetch_smard
 
     era5 = fetch_era5(lat, lon, start, end, tz=tz)
     clearsky = get_clearsky(
@@ -350,9 +352,14 @@ def backtest(
             model = load_model(model_path)
         trajectories = run_ensemble(model, nwp_raw, clearsky, clearsky_15min, installed_capacity_mw)
 
-    token = entsoe_api_key or os.environ.get("ENTSOE_API_KEY")
-    actuals = fetch_entsoe(area, start, end, api_key=token)
-    actuals = actuals.tz_convert(tz).reindex(trajectories.index, method="ffill")
+    if use_smard:
+        actuals = fetch_smard(start, end, tz=tz)
+    else:
+        token = entsoe_api_key or os.environ.get("ENTSOE_API_KEY")
+        actuals = fetch_entsoe(area, start, end, api_key=token)
+    actuals = actuals.tz_convert(tz).reindex(
+        trajectories.index, method=None if use_smard else "ffill"
+    )
 
     return trajectories, actuals
 

@@ -3,6 +3,8 @@
 
 import os
 import time
+from zoneinfo import ZoneInfo
+
 import requests
 import openmeteo_requests
 import requests_cache
@@ -13,6 +15,10 @@ from xml.etree import ElementTree as ET
 from retry_requests import retry
 
 _RATE_LIMIT_WAIT = 65  # seconds to wait after hitting Open-Meteo per-minute rate limit
+
+_SMARD_SOLAR_MODULE_ID = 125   # Photovoltaik: Realisierte Erzeugung DE-LU
+_SMARD_SOLAR_REGION = "DE-LU"
+_SMARD_MWH_TO_MW = 4.0        # SMARD values are MWh/quarter-hour → MW average
 
 _CACHE_DIR = Path(__file__).parent.parent / "data" / "era5_cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -216,3 +222,77 @@ def fetch_entsoe(
     combined = pd.concat(chunks).sort_index()
     combined = combined[~combined.index.duplicated(keep="first")]
     return combined.loc[start_dt : end_dt - pd.Timedelta(hours=1)]
+
+
+_SMARD_INDEX_URL = (
+    "https://www.smard.de/app/chart_data/{module_id}/{region}/index_{resolution}.json"
+)
+_SMARD_DATA_URL = (
+    "https://www.smard.de/app/chart_data/{module_id}/{region}"
+    "/{module_id}_{region}_{resolution}_{timestamp}.json"
+)
+
+
+def fetch_smard(
+    start: str,
+    end: str,
+    tz: str = "Europe/Berlin",
+) -> pd.Series:
+    """
+    Fetch quarter-hourly solar generation actuals from SMARD (DE-LU, module 125).
+
+    No API key required. Returns 15-min UTC pd.Series in MW.
+    Uses the chart_data JSON API (weekly files). SMARD values are MWh per
+    quarter-hour interval; multiply by 4 to get average MW.
+
+    Parameters
+    ----------
+    start, end : str
+        "YYYY-MM-DD" inclusive date range.
+    tz : str
+        Local timezone for boundary interpretation. Default "Europe/Berlin".
+
+    Returns
+    -------
+    pd.Series
+        15-min solar generation in MW, UTC DatetimeIndex, name="solar_mw".
+    """
+    local_tz = ZoneInfo(tz)
+    start_ms = int(pd.Timestamp(start).tz_localize(local_tz).timestamp() * 1000)
+    end_ms = int(
+        (pd.Timestamp(end) + pd.Timedelta(days=1)).tz_localize(local_tz).timestamp() * 1000
+    )
+
+    index_url = _SMARD_INDEX_URL.format(
+        module_id=_SMARD_SOLAR_MODULE_ID,
+        region=_SMARD_SOLAR_REGION,
+        resolution="quarterhour",
+    )
+    resp = requests.get(index_url, timeout=20)
+    resp.raise_for_status()
+    week_timestamps = resp.json()["timestamps"]
+
+    # keep weeks that overlap with [start_ms, end_ms)
+    overlapping = [t for t in week_timestamps if t < end_ms and t + 7 * 24 * 3600 * 1000 > start_ms]
+
+    all_points: list[tuple[int, float]] = []
+    for week_ts in overlapping:
+        data_url = _SMARD_DATA_URL.format(
+            module_id=_SMARD_SOLAR_MODULE_ID,
+            region=_SMARD_SOLAR_REGION,
+            resolution="quarterhour",
+            timestamp=week_ts,
+        )
+        r = requests.get(data_url, timeout=20)
+        r.raise_for_status()
+        for ts_ms, val in r.json().get("series", []):
+            if val is not None and start_ms <= ts_ms < end_ms:
+                all_points.append((ts_ms, float(val)))
+
+    if not all_points:
+        return pd.Series(dtype=float, name="solar_mw")
+
+    all_points.sort(key=lambda x: x[0])
+    index = pd.to_datetime([t for t, _ in all_points], unit="ms", utc=True)
+    values = [v * _SMARD_MWH_TO_MW for _, v in all_points]
+    return pd.Series(values, index=index, name="solar_mw", dtype=float)
