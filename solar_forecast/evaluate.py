@@ -33,7 +33,7 @@ def crps_score(
     obs_vals = obs.values
     fct_vals = fct.values
 
-    valid = ~np.isnan(obs_vals)
+    valid = ~np.isnan(obs_vals) & ~np.isnan(fct_vals).any(axis=1)
     obs_vals = obs_vals[valid]
     fct_vals = fct_vals[valid]
 
@@ -73,7 +73,7 @@ def pit_values(
     obs_vals = obs.values
     fct_vals = fct.values
 
-    valid = ~np.isnan(obs_vals)
+    valid = ~np.isnan(obs_vals) & ~np.isnan(fct_vals).any(axis=1)
     obs_vals = obs_vals[valid]
     fct_vals = fct_vals[valid]
 

@@ -34,7 +34,7 @@ def fit(
     obs_vals = obs_aligned.values
     fct_vals = fct_aligned.values
 
-    valid = ~np.isnan(obs_vals)
+    valid = ~np.isnan(obs_vals) & ~np.isnan(fct_vals).any(axis=1)
     obs_vals = obs_vals[valid]
     fct_vals = fct_vals[valid]
 
