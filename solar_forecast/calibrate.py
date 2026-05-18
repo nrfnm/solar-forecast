@@ -1,4 +1,4 @@
-"""Calibrate ensemble forecasts: bias correction + spread correction."""
+"""Calibrate ensemble forecasts: bias correction and spread correction."""
 
 import json
 import os
@@ -201,20 +201,15 @@ def apply_emos(
     rng = np.random.default_rng(rng_seed)
     out = np.zeros((len(forecasts), n_samples))
 
-    for t in np.where(is_day)[0]:
-        a_std = (0.0 - mu[t]) / sigma[t]
-        out[t] = truncnorm.rvs(
-            a=a_std, b=np.inf,
-            loc=mu[t], scale=sigma[t],
-            size=n_samples,
-            random_state=rng,
-        )
 
-    cols = (
-        forecasts.columns
-        if n_samples == len(forecasts.columns)
-        else [f"member_{i:03d}" for i in range(n_samples)]
-    )
+    day_idx = np.where(is_day)[0]
+    mu_day = mu[day_idx][:, None]  # shape (T_day, 1)
+    sigma_day = sigma[day_idx][:, None]  # shape (T_day, 1)
+    a_std_day = (0.0 - mu_day) / sigma_day
+    out[day_idx] = truncnorm.rvs(a=a_std_day, b=np.inf, loc=mu_day, scale=sigma_day,
+                                 size=(len(day_idx), n_samples))
+    cols = [f"member_{i:03d}" for i in range(n_samples)]
+
     return pd.DataFrame(out, index=forecasts.index, columns=cols)
 
 
