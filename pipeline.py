@@ -72,7 +72,7 @@ def run(
         f"  Submission format: {len(submission)} timesteps × {submission.shape[1]} scenarios "
         f"(target {target_start_ts.date()})"
     )
-
+    #TODO replace evaluation block
     today_in_tz = pd.Timestamp.now(tz=tz).date()
     if evaluate_actuals and target_start_ts.date() >= today_in_tz:
         print("  Skipping evaluation — target day has not yet passed.")
