@@ -77,15 +77,25 @@ Fetch ensemble NWP forecasts from Open-Meteo.
         inclusive="left",
     ).tz_convert("Europe/Vienna")
 
-    result = {}
+    # SDK stores one entry per (variable, member) pair; group by Variable() code
+    # in order of first appearance, which matches the NWP_VARIABLES request order.
+    var_data: dict[int, list[tuple[int, np.ndarray]]] = {}
+    var_order: list[int] = []
+    for i in range(hourly.VariablesLength()):
+        entry = hourly.Variables(i)
+        code = entry.Variable()
+        if code not in var_data:
+            var_data[code] = []
+            var_order.append(code)
+        var_data[code].append((entry.EnsembleMember(), entry.ValuesAsNumpy()))
 
-    for i, var in enumerate(NWP_VARIABLES):
-        values = hourly.Variables(i).ValuesAsNumpy()
-        n_members = values.shape[0]//len(times)
-        result[var] = pd.DataFrame(
-            values.reshape(n_members, len(times)).T,
+    result = {}
+    for var_name, code in zip(NWP_VARIABLES, var_order):
+        members = sorted(var_data[code], key=lambda x: x[0])
+        result[var_name] = pd.DataFrame(
+            np.stack([vals for _, vals in members], axis=1),
             index=times,
-            columns=[f"member_{m:02d}" for m in range(n_members)],
+            columns=[f"member_{mid:02d}" for mid, _ in members],
         )
 
     return result

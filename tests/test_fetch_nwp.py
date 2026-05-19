@@ -19,15 +19,27 @@ END_TS = START_TS + N_HOURS * 3600
 
 
 def _make_mock_client():
-    """Build a mock openmeteo client that returns N_MEMBERS × N_HOURS data."""
-    mock_var = MagicMock()
-    mock_var.ValuesAsNumpy.return_value = np.zeros(N_HOURS * N_MEMBERS)
+    """Build a mock openmeteo client that returns N_MEMBERS × N_HOURS data.
+
+    The SDK now stores one entry per (variable, member) pair with separate
+    Variable() and EnsembleMember() fields, rather than concatenating all
+    members into a single ValuesAsNumpy() array.
+    """
+    entries = []
+    for var_idx in range(len(NWP_VARIABLES)):
+        for mem_idx in range(N_MEMBERS):
+            entry = MagicMock()
+            entry.Variable.return_value = var_idx
+            entry.EnsembleMember.return_value = mem_idx
+            entry.ValuesAsNumpy.return_value = np.zeros(N_HOURS)
+            entries.append(entry)
 
     mock_hourly = MagicMock()
     mock_hourly.Time.return_value = START_TS
     mock_hourly.TimeEnd.return_value = END_TS
     mock_hourly.Interval.return_value = 3600
-    mock_hourly.Variables.return_value = mock_var
+    mock_hourly.VariablesLength.return_value = len(entries)
+    mock_hourly.Variables.side_effect = lambda i: entries[i]
 
     mock_response = MagicMock()
     mock_response.Hourly.return_value = mock_hourly
