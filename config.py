@@ -24,7 +24,7 @@ TZ = "Europe/Vienna"
 # Used to convert dimensionless CI predictions to MW: MW = CI × (poa / 1000) × CAPACITY_MW
 # Source: Bundesnetzagentur Marktstammdatenregister, ~120 GWp installed in Germany as of mid-2026
 # (99 GW end-2024, growing ~18 GW/year). Verify at bundesnetzagentur.de before retraining.
-CAPACITY_MW = 120_000.0
+CAPACITY_MW = 123000.0
 
 # --- Physics ---
 STC_IRRADIANCE = 1000.0  # W/m² — irradiance at which panels produce rated capacity
