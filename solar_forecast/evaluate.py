@@ -33,6 +33,10 @@ def crps_score(
     obs_vals = obs.values
     fct_vals = fct.values
 
+    valid = ~np.isnan(obs_vals) & ~np.isnan(fct_vals).any(axis=1)
+    obs_vals = obs_vals[valid]
+    fct_vals = fct_vals[valid]
+
     crps_vals = ps.crps_ensemble(obs_vals, fct_vals)
     crps_mean = float(crps_vals.mean())
 
@@ -68,6 +72,11 @@ def pit_values(
     obs, fct = observations.align(forecasts, join="inner", axis=0)
     obs_vals = obs.values
     fct_vals = fct.values
+
+    valid = ~np.isnan(obs_vals) & ~np.isnan(fct_vals).any(axis=1)
+    obs_vals = obs_vals[valid]
+    fct_vals = fct_vals[valid]
+
     return np.array([np.mean(fct_vals[i] < obs_vals[i]) for i in range(len(obs_vals))])
 
 

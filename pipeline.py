@@ -1,7 +1,6 @@
 """Daily forecast pipeline: fetch NWP → ensemble → (calibrate) → (evaluate) → save."""
 
 import os
-import numpy as np
 import pandas as pd
 from pathlib import Path
 from datetime import date, timedelta
@@ -68,29 +67,21 @@ def run(
     day_mask = (trajectories.index >= target_start_ts) & (
         trajectories.index < target_start_ts + pd.Timedelta(hours=24)
     )
-    target_day = trajectories[day_mask]
-    # Force exactly 96 15-min slots (00:00–23:45). Interpolate between hourly points
-    # and forward-fill the tail (23:15–23:45) from the last hourly value.
-    target_index = pd.date_range(target_start_ts, periods=96, freq="15min", tz=trajectories.index.tz)
-    resampled = (
-        target_day.resample("15min").asfreq()
-        .reindex(target_index)
-        .interpolate("linear")
-        .ffill()
-    )
-    submission = pd.DataFrame(
-        np.clip(resampled.values, 0, None),
-        index=resampled.index,
-        columns=target_day.columns,
-    )
+    submission = trajectories[day_mask].clip(lower=0)
     print(
         f"  Submission format: {len(submission)} timesteps × {submission.shape[1]} scenarios "
-        f"(15-min, target {target_start_ts.date()})"
+        f"(target {target_start_ts.date()})"
     )
-
+    #TODO replace evaluation block
     today_in_tz = pd.Timestamp.now(tz=tz).date()
     if evaluate_actuals and target_start_ts.date() >= today_in_tz:
         print("  Skipping evaluation — target day has not yet passed.")
+        evaluate_actuals = False
+    elif evaluate_actuals and target_start_ts.date() < today_in_tz:
+        print(
+            "  Skipping evaluation — live NWP has no data for past dates. "
+            "Use scripts/backtest.py for historical evaluation."
+        )
         evaluate_actuals = False
 
     if evaluate_actuals:
