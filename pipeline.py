@@ -22,9 +22,17 @@ def run(
     entsoe_api_key: Optional[str] = None,
     evaluate_actuals: bool = False,
     save: bool = True,
+    use_quantile: bool = False,
 ) -> pd.DataFrame:
     """
-    Run the daily forecast pipeline using the quantile ensemble model.
+    Run the daily forecast pipeline.
+
+    Default: CI regression model applied across all 50 NWP members (one
+    trajectory per member). The submission layer interpolates to however
+    many scenarios the challenge requires.
+
+    With use_quantile=True: 100 quantile CI models are used instead, each
+    paired with a cycled NWP member.
 
     Uses config.CENTROIDS for spatial aggregation if set, otherwise falls
     back to the single point config.LAT / config.LON.
@@ -38,11 +46,13 @@ def run(
         CRPS + PIT metrics. Only meaningful for past dates.
     save : bool
         Write trajectories to data/forecasts/<run_date>.parquet.
+    use_quantile : bool
+        Use quantile ensemble instead of the default CI regression model.
 
     Returns
     -------
     pd.DataFrame
-        Shape (timesteps, 100) in MW — 100 quantile trajectories, calibrated.
+        Shape (timesteps, n_members) in MW — calibrated trajectories.
     """
     # run_date is the TARGET date (day being forecast/evaluated).
     # Default to tomorrow so the daily production run always targets the next day.
@@ -50,12 +60,14 @@ def run(
     n_centroids = len(config.CENTROIDS) if config.CENTROIDS else 1
     print(f"=== Pipeline run: {run_date} ({n_centroids} centroid(s)) ===")
 
-    print("Loading quantile models...")
-    quantile_models = load_quantile_models()
-    print(f"  {len(quantile_models)} quantile models loaded")
-
-    print("Fetching NWP and running quantile ensemble...")
-    trajectories = forecast_country(quantile_models=quantile_models, forecast_days=forecast_days)
+    if use_quantile:
+        print("Loading quantile models...")
+        quantile_models = load_quantile_models()
+        print(f"  {len(quantile_models)} quantile models loaded")
+        trajectories = forecast_country(quantile_models=quantile_models, forecast_days=forecast_days)
+    else:
+        print("Fetching NWP and running CI ensemble...")
+        trajectories = forecast_country(forecast_days=forecast_days)
     print(f"  Output: {trajectories.shape[0]} timesteps × {trajectories.shape[1]} members")
 
     print("  Applying calibration...")
@@ -115,6 +127,8 @@ if __name__ == "__main__":
     parser.add_argument("--evaluate", action="store_true",
                         help="Fetch actuals and compute CRPS + PIT (past dates only)")
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--quantile", action="store_true",
+                        help="Use quantile ensemble instead of CI regression model")
     args = parser.parse_args()
 
     run(
@@ -123,4 +137,5 @@ if __name__ == "__main__":
         entsoe_api_key=os.environ.get("ENTSOE_API_KEY"),
         evaluate_actuals=args.evaluate,
         save=not args.no_save,
+        use_quantile=args.quantile,
     )
