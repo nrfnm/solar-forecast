@@ -9,7 +9,7 @@ from typing import Optional
 from solar_forecast.clearsky import get_clearsky, temperature_efficiency
 from solar_forecast.fetch_nwp import fetch_nwp
 from solar_forecast.features import build_features
-from solar_forecast.train import FEATURE_COLS, QUANTILE_LEVELS, load_model, load_quantile_models
+from solar_forecast.train import FEATURE_COLS, QUANTILE_LEVELS, load_model, load_quantile_models, _inject_nwp_noise
 import config
 
 _STC_IRRADIANCE = config.STC_IRRADIANCE
@@ -336,9 +336,11 @@ def backtest(
         surface_azimuth=surface_azimuth,
     )
 
+    rng = np.random.default_rng(42)
+    noisy_members = [_inject_nwp_noise(era5, rng) for _ in range(n_members)]
     nwp_raw = {
         var: pd.DataFrame(
-            {f"member_{m:02d}": era5[var] for m in range(n_members)},
+            {f"member_{m:02d}": noisy_members[m][var] for m in range(n_members)},
         )
         for var in era5.columns
     }
