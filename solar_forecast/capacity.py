@@ -150,6 +150,10 @@ def get_k_centroids(df: pd.DataFrame, k: int = 5, random_state: int = 42) -> pd.
     centers = pd.DataFrame(km.cluster_centers_, columns=["lat", "lon"])
     centers["weight"] = (capacity_per_cluster / total).values
 
+    #fail loudly if centroids are not evenly distributed
+    if centers["weight"].sum() != 1.0:
+        raise ValueError("Centroid weights don't sum to 1.0")
+
     return centers
 
 
