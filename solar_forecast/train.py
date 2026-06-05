@@ -474,7 +474,7 @@ if __name__ == "__main__":
     parser.add_argument("--capacity-mw", type=float, default=config.CAPACITY_MW)
     parser.add_argument("--area", default=config.AREA, help="ENTSO-E area: DE or AT")
     parser.add_argument("--no-cv", action="store_true", help="Skip walk-forward CV")
-    parser.add_argument("--quantile", action="store_true", help="Also train 50 quantile models")
+    parser.add_argument("--quantile", action="store_true", help="Also train 100 quantile models")
     parser.add_argument("--augments", type=int, default=4,
                         help="Noise-augmented ERA5 copies added to training (default: 4)")
     args = parser.parse_args()

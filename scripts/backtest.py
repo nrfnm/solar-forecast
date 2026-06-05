@@ -19,7 +19,7 @@ import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from solar_forecast.ensemble import backtest
-from solar_forecast.calibrate import fit as fit_calibration, apply_spread_correction as apply_calibration
+from solar_forecast.calibrate import fit_emos as fit_calibration, apply_emos as apply_calibration
 from solar_forecast.evaluate import evaluate, print_summary
 
 
