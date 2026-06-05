@@ -175,9 +175,13 @@ def apply_emos(
     rng_seed: int = 42,
 ) -> pd.DataFrame:
     """
-    Replace ensemble trajectories with samples from EMOS-fitted Truncated Normal.
+    Apply EMOS calibration via Ensemble Copula Coupling (ECC).
 
-    Daytime rows: sample n_samples from TruncNormal(a + b·ens_mean, sqrt(c + d·ens_var), lower=0).
+    Daytime rows: map each NWP member's rank through the EMOS TruncNormal distribution
+    (a + b·ens_mean, sqrt(c + d·ens_var), lower=0). The first n_nwp output members follow
+    NWP rank order; the second n_nwp use complementary ranks (anti-correlated pair).
+    This preserves temporal coherence — each output trajectory follows its NWP template
+    smoothly — while maintaining EMOS-calibrated marginal distributions at each timestep.
     Nighttime rows: keep as zeros.
     Falls back to apply_spread_correction() if params contain no "emos" key.
     """
@@ -198,18 +202,22 @@ def apply_emos(
     sigma = np.sqrt(c + d * ens_var).clip(1e-3)
     is_day = ens.max(axis=1) > 0
 
-    rng = np.random.default_rng(rng_seed)
+    n_nwp = ens.shape[1]
     out = np.zeros((len(forecasts), n_samples))
 
+    for t in np.where(is_day)[0]:
+        mu_t = float(mu[t])
+        sigma_t = float(sigma[t])
+        a_std_t = (0.0 - mu_t) / sigma_t
 
-    day_idx = np.where(is_day)[0]
-    mu_day = mu[day_idx][:, None]  # shape (T_day, 1)
-    sigma_day = sigma[day_idx][:, None]  # shape (T_day, 1)
-    a_std_day = (0.0 - mu_day) / sigma_day
-    out[day_idx] = truncnorm.rvs(a=a_std_day, b=np.inf, loc=mu_day, scale=sigma_day,
-                                 size=(len(day_idx), n_samples))
+        ranks = np.argsort(np.argsort(ens[t]))  # 0-based rank of each NWP member
+        u_fwd = (ranks + 0.5) / n_nwp
+        u_rev = 1.0 - u_fwd
+        u_all = np.concatenate([u_fwd, u_rev])[:n_samples]
+
+        out[t] = truncnorm.ppf(u_all, a=a_std_t, b=np.inf, loc=mu_t, scale=sigma_t)
+
     cols = [f"member_{i:03d}" for i in range(n_samples)]
-
     return pd.DataFrame(out, index=forecasts.index, columns=cols)
 
 
