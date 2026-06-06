@@ -297,13 +297,15 @@ def backtest(
     quantile_models: Optional[list] = None,
     entsoe_api_key: Optional[str] = None,
     use_smard: bool = True,
+    use_ifs_historical: bool = False,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """
-    Run a historical backtest using ERA5 reanalysis as pseudo-NWP input.
+    Run a historical backtest using ERA5 reanalysis (or IFS historical) as pseudo-NWP input.
 
-    ERA5 is broadcast into n_members identical copies. With use_quantile=True,
-    member i is run through quantile model i, giving proper probabilistic spread
-    from quantile regression rather than member_id feature variation.
+    The NWP data is broadcast into n_members noisy copies via _inject_nwp_noise.
+    With use_ifs_historical=True, fetches from the Open-Meteo Historical Forecast API
+    (ecmwf_ifs025, available since 2024-02-03) instead of ERA5, closing the
+    training/inference distribution gap for EMOS calibration.
 
     Returns
     -------
@@ -316,7 +318,11 @@ def backtest(
     import os
     from solar_forecast.fetch_actuals import fetch_era5, fetch_entsoe, fetch_smard
 
-    era5 = fetch_era5(lat, lon, start, end, tz=tz)
+    if use_ifs_historical:
+        from solar_forecast.fetch_actuals import fetch_ifs_historical
+        era5 = fetch_ifs_historical(lat, lon, start, end, tz=tz)
+    else:
+        era5 = fetch_era5(lat, lon, start, end, tz=tz)
     clearsky = get_clearsky(
         lat, lon, era5.index,
         altitude=altitude,

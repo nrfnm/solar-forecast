@@ -144,9 +144,10 @@ def _aggregate_centroids_era5(
     altitude: float = 500,
     surface_tilt: float = 30,
     surface_azimuth: float = 180,
+    use_ifs_historical: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Fetch ERA5 + clearsky at each centroid and return capacity-weighted aggregates.
+    Fetch ERA5 (or IFS historical) + clearsky at each centroid and return capacity-weighted aggregates.
 
     Each weather variable becomes a weighted average across centroids.
     poa_clearsky is also weighted so that: weighted_avg × total_capacity = sum of
@@ -160,7 +161,11 @@ def _aggregate_centroids_era5(
         print(f"  [{i + 1}/{len(centroids)}] lat={c['lat']}, lon={c['lon']}, w={c['weight']:.3f}")
         if i > 0:
             time.sleep(65)  # stay within Open-Meteo free-tier 1 req/min rate limit
-        era5_i = fetch_era5(c["lat"], c["lon"], start, end, tz=tz)
+        if use_ifs_historical:
+            from solar_forecast.fetch_actuals import fetch_ifs_historical
+            era5_i = fetch_ifs_historical(c["lat"], c["lon"], start, end, tz=tz)
+        else:
+            era5_i = fetch_era5(c["lat"], c["lon"], start, end, tz=tz)
         cs_i = get_clearsky(
             c["lat"], c["lon"], era5_i.index,
             altitude=altitude,
@@ -199,29 +204,41 @@ def prepare_training_data(
     surface_azimuth: float = 180,
     entsoe_api_key: Optional[str] = None,
     n_noise_augments: int = 4,
+    use_ifs_historical: bool = False,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """
-    Fetch ERA5 + ENTSO-E actuals, build features, compute CI target.
+    Fetch ERA5 (or IFS historical) + ENTSO-E actuals, build features, compute CI target.
 
-    n_noise_augments noisy copies of the ERA5 features are appended to the clean
+    n_noise_augments noisy copies of the NWP features are appended to the clean
     copy to teach the model to handle imperfect NWP inputs at inference time.
-    The CI target is always computed from clean ERA5 (ground truth).
+    The CI target is always computed from clean NWP data (ground truth proxy).
+
+    With use_ifs_historical=True, fetches from the Open-Meteo Historical Forecast API
+    (ecmwf_ifs025, available since 2024-02-03) instead of ERA5. This closes the
+    training/inference distribution gap since training inputs match the live IFS
+    errors seen at deployment time.
 
     Returns
     -------
     X : pd.DataFrame  — FEATURE_COLS, daytime rows with valid actuals only.
     y : pd.Series     — actual CI aligned to X.
     """
+    source_label = "IFS historical" if use_ifs_historical else "ERA5"
     if config.CENTROIDS:
-        print(f"  Aggregating ERA5 across {len(config.CENTROIDS)} centroids...")
+        print(f"  Aggregating {source_label} across {len(config.CENTROIDS)} centroids...")
         era5, clearsky = _aggregate_centroids_era5(
             config.CENTROIDS, start, end,
             tz=tz, altitude=altitude,
             surface_tilt=surface_tilt, surface_azimuth=surface_azimuth,
+            use_ifs_historical=use_ifs_historical,
         )
     else:
-        print("  Fetching ERA5 (single point)...")
-        era5 = fetch_era5(lat, lon, start, end, tz=tz)
+        print(f"  Fetching {source_label} (single point)...")
+        if use_ifs_historical:
+            from solar_forecast.fetch_actuals import fetch_ifs_historical
+            era5 = fetch_ifs_historical(lat, lon, start, end, tz=tz)
+        else:
+            era5 = fetch_era5(lat, lon, start, end, tz=tz)
         clearsky = get_clearsky(
             lat, lon, era5.index,
             altitude=altitude,
@@ -345,6 +362,7 @@ def train(
     quantile: bool = False,
     save_path: Optional[Path] = None,
     n_noise_augments: int = 4,
+    use_ifs_historical: bool = False,
 ) -> lgb.LGBMRegressor:
     """
     Full training pipeline: fetch → walk-forward CV → final model on all data.
@@ -358,13 +376,15 @@ def train(
     -------
     lgb.LGBMRegressor  — fitted CI model, also saved to models/lgbm_ci.pkl.
     """
-    print(f"Preparing training data ({start} → {end})...")
+    source = "IFS historical" if use_ifs_historical else "ERA5"
+    print(f"Preparing training data ({start} → {end}, source={source})...")
     X, y = prepare_training_data(
         lat, lon, start, end, installed_capacity_mw,
         area=area, tz=tz, altitude=altitude,
         surface_tilt=surface_tilt, surface_azimuth=surface_azimuth,
         entsoe_api_key=entsoe_api_key,
         n_noise_augments=n_noise_augments,
+        use_ifs_historical=use_ifs_historical,
     )
     print(f"  {len(X)} daytime rows loaded ({n_noise_augments + 1}x augmented).")
 

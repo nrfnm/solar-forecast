@@ -118,6 +118,51 @@ def fetch_era5(
     )
 
 
+def fetch_ifs_historical(
+    lat: float,
+    lon: float,
+    start: str,
+    end: str,
+    tz: str = "Europe/Vienna",
+) -> pd.DataFrame:
+    """
+    Fetch deterministic ECMWF IFS historical forecasts from Open-Meteo.
+
+    Available since 2024-02-03. Returns the same structure as fetch_era5() but
+    with all 8 NWP_VARIABLES (including cloud_cover_low/mid/high absent from ERA5).
+    Use instead of ERA5 to close the training/inference distribution gap —
+    the IFS historical forecast has realistic IFS errors, unlike near-perfect ERA5.
+    """
+    from solar_forecast.fetch_nwp import NWP_VARIABLES
+
+    client = _get_om_client()
+    responses = _rate_limited_weather_api(
+        client,
+        "https://historical-forecast-api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": start,
+            "end_date": end,
+            "hourly": NWP_VARIABLES,
+            "models": "ecmwf_ifs025",
+            "timezone": tz,
+        },
+    )
+    response = responses[0]
+    hourly = response.Hourly()
+    times = pd.date_range(
+        start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
+        end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
+        freq=pd.Timedelta(seconds=hourly.Interval()),
+        inclusive="left",
+    ).tz_convert(tz)
+    return pd.DataFrame(
+        {var: hourly.Variables(i).ValuesAsNumpy() for i, var in enumerate(NWP_VARIABLES)},
+        index=times,
+    )
+
+
 def _parse_entsoe_xml(xml_text: str) -> pd.Series:
     """Parse ENTSO-E ActualGenerationPerProductionType XML into hourly UTC MW Series."""
     ns = {"e": "urn:iec62325.351:tc57wg16:451-6:generationloaddocument:3:0"}
