@@ -297,15 +297,14 @@ def backtest(
     quantile_models: Optional[list] = None,
     entsoe_api_key: Optional[str] = None,
     use_smard: bool = True,
-    use_ifs_historical: bool = False,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """
-    Run a historical backtest using ERA5 reanalysis (or IFS historical) as pseudo-NWP input.
+    Run a historical backtest using IFS historical forecasts as pseudo-NWP input.
 
-    The NWP data is broadcast into n_members noisy copies via _inject_nwp_noise.
-    With use_ifs_historical=True, fetches from the Open-Meteo Historical Forecast API
-    (ecmwf_ifs025, available since 2024-02-03) instead of ERA5, closing the
-    training/inference distribution gap for EMOS calibration.
+    The deterministic IFS series is broadcast into n_members noisy copies via
+    _inject_nwp_noise. Fetched from the Open-Meteo Historical Forecast API
+    (ecmwf_ifs025, available since 2024-02-03), so input errors match the live
+    IFS errors at deployment time — relevant for EMOS calibration.
 
     Returns
     -------
@@ -316,24 +315,20 @@ def backtest(
         15-min SMARD actuals by default; pass use_smard=False for hourly ENTSO-E.
     """
     import os
-    from solar_forecast.fetch_actuals import fetch_era5, fetch_entsoe, fetch_smard
+    from solar_forecast.fetch_actuals import fetch_ifs_historical, fetch_entsoe, fetch_smard
 
-    if use_ifs_historical:
-        from solar_forecast.fetch_actuals import fetch_ifs_historical
-        era5 = fetch_ifs_historical(lat, lon, start, end, tz=tz)
-    else:
-        era5 = fetch_era5(lat, lon, start, end, tz=tz)
+    ifs = fetch_ifs_historical(lat, lon, start, end, tz=tz)
     clearsky = get_clearsky(
-        lat, lon, era5.index,
+        lat, lon, ifs.index,
         altitude=altitude,
         surface_tilt=surface_tilt,
         surface_azimuth=surface_azimuth,
     )
     times_15min = pd.date_range(
-        start=era5.index[0],
-        end=era5.index[-1] + pd.Timedelta(minutes=45),
+        start=ifs.index[0],
+        end=ifs.index[-1] + pd.Timedelta(minutes=45),
         freq="15min",
-        tz=era5.index.tz,
+        tz=ifs.index.tz,
     )
     clearsky_15min = get_clearsky(
         lat, lon, times_15min,
@@ -343,12 +338,12 @@ def backtest(
     )
 
     rng = np.random.default_rng(42)
-    noisy_members = [_inject_nwp_noise(era5, rng) for _ in range(n_members)]
+    noisy_members = [_inject_nwp_noise(ifs, rng) for _ in range(n_members)]
     nwp_raw = {
         var: pd.DataFrame(
             {f"member_{m:02d}": noisy_members[m][var] for m in range(n_members)},
         )
-        for var in era5.columns
+        for var in ifs.columns
     }
 
     if use_quantile:

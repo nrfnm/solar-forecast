@@ -7,12 +7,12 @@ import pandas as pd
 import pytest
 
 from solar_forecast.fetch_actuals import (
-    ERA5_VARIABLES,
     ENTSOE_AREAS,
-    fetch_era5,
+    fetch_ifs_historical,
     fetch_entsoe,
     _parse_entsoe_xml,
 )
+from solar_forecast.fetch_nwp import NWP_VARIABLES
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,46 +97,47 @@ EMPTY_XML = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 # ---------------------------------------------------------------------------
-# fetch_era5
+# fetch_ifs_historical
 # ---------------------------------------------------------------------------
 
-class TestFetchEra5:
+class TestFetchIfsHistorical:
     @pytest.fixture(autouse=True)
     def mock_client(self):
         with patch("solar_forecast.fetch_actuals._get_om_client", return_value=_make_mock_archive_client()):
             yield
 
     def test_returns_dataframe(self):
-        result = fetch_era5(48.2, 16.3, "2024-06-21", "2024-06-21")
+        result = fetch_ifs_historical(48.2, 16.3, "2024-06-21", "2024-06-21")
         assert isinstance(result, pd.DataFrame)
 
     def test_all_columns_present(self):
-        result = fetch_era5(48.2, 16.3, "2024-06-21", "2024-06-21")
-        assert set(ERA5_VARIABLES).issubset(set(result.columns))
+        result = fetch_ifs_historical(48.2, 16.3, "2024-06-21", "2024-06-21")
+        assert set(NWP_VARIABLES).issubset(set(result.columns))
 
     def test_correct_length(self):
-        result = fetch_era5(48.2, 16.3, "2024-06-21", "2024-06-21")
+        result = fetch_ifs_historical(48.2, 16.3, "2024-06-21", "2024-06-21")
         assert len(result) == N_HOURS
 
     def test_index_is_timezone_aware(self):
-        result = fetch_era5(48.2, 16.3, "2024-06-21", "2024-06-21")
+        result = fetch_ifs_historical(48.2, 16.3, "2024-06-21", "2024-06-21")
         assert result.index.tz is not None
 
-    def test_api_called_with_archive_url_and_correct_params(self):
+    def test_api_called_with_historical_forecast_url_and_correct_params(self):
         mock_client = _make_mock_archive_client()
         with patch("solar_forecast.fetch_actuals._get_om_client", return_value=mock_client):
-            fetch_era5(48.2, 16.3, "2024-06-01", "2024-06-30", tz="Europe/Vienna")
+            fetch_ifs_historical(48.2, 16.3, "2024-06-01", "2024-06-30", tz="Europe/Vienna")
 
         url, params = (
             mock_client.weather_api.call_args.args[0],
             mock_client.weather_api.call_args.kwargs["params"],
         )
-        assert "archive-api.open-meteo.com" in url
+        assert "historical-forecast-api.open-meteo.com" in url
         assert params["latitude"] == 48.2
         assert params["longitude"] == 16.3
         assert params["start_date"] == "2024-06-01"
         assert params["end_date"] == "2024-06-30"
-        assert set(params["hourly"]) == set(ERA5_VARIABLES)
+        assert params["models"] == "ecmwf_ifs025"
+        assert set(params["hourly"]) == set(NWP_VARIABLES)
 
 
 # ---------------------------------------------------------------------------

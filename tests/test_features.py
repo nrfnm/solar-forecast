@@ -207,7 +207,7 @@ class TestBuildAllMembers:
         assert len(result) == 5 * len(nwp_df)
 
     def test_invalid_member_name_falls_back_to_minus_one(self, nwp_df, clearsky_df):
-        result = build_all_members({"era5": nwp_df}, clearsky_df)
+        result = build_all_members({"ifs": nwp_df}, clearsky_df)
         ids = set(result.index.get_level_values("member_id").unique())
         assert ids == {-1}
 

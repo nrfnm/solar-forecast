@@ -1,10 +1,8 @@
 """
-Retrain LightGBM + refit EMOS using IFS historical forecasts instead of ERA5.
+Retrain LightGBM + refit EMOS using IFS historical forecasts.
 
-Replaces the ERA5-based training pipeline with deterministic ECMWF IFS historical
-data (Open-Meteo Historical Forecast API, available since 2024-02-03). This closes
-the training/inference distribution gap — the model trains on inputs with realistic
-IFS errors rather than near-perfect reanalysis.
+Wraps the standard train()+backtest()+EMOS pipeline with a sensible
+train/backtest split anchored at the earliest IFS historical date.
 
 Data split:
     2024-02-03 ──────────── <backtest-start> │ <backtest-start> ──── <backtest-end>
@@ -44,7 +42,6 @@ def main(
             start=train_start,
             end=backtest_start,
             installed_capacity_mw=config.CAPACITY_MW,
-            use_ifs_historical=True,
         )
     else:
         print("Skipping LightGBM retrain (--emos-only).")
@@ -53,7 +50,6 @@ def main(
     trajectories, actuals = backtest(
         start=backtest_start,
         end=backtest_end,
-        use_ifs_historical=True,
         use_smard=True,
     )
     print(f"  Trajectories: {trajectories.shape}, actuals: {actuals.shape}")

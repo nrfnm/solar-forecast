@@ -1,8 +1,8 @@
 """
-Held-out evaluation using ERA5 as input and ENTSO-E as target.
+Held-out evaluation using IFS historical as input and ENTSO-E as target.
 
-Note: ERA5 is near-perfect reanalysis, so CRPS will be optimistic
-compared to real NWP inference. Use this as an upper-bound estimate.
+Inputs come from the Open-Meteo Historical Forecast API (ecmwf_ifs025), so
+errors match live IFS inference rather than near-perfect reanalysis.
 
 Usage:
     python scripts/evaluate_holdout.py --train-end 2023-12-31 --eval-start 2024-01-01 --eval-end 2024-12-31
@@ -57,9 +57,9 @@ def run_holdout_eval(
 
     # Convert CI predictions to MW for evaluation
     from solar_forecast.clearsky import get_clearsky
-    from solar_forecast.fetch_actuals import fetch_era5
-    era5 = fetch_era5(config.LAT, config.LON, eval_start, eval_end, tz=tz)
-    clearsky = get_clearsky(config.LAT, config.LON, era5.index)
+    from solar_forecast.fetch_actuals import fetch_ifs_historical
+    ifs = fetch_ifs_historical(config.LAT, config.LON, eval_start, eval_end, tz=tz)
+    clearsky = get_clearsky(config.LAT, config.LON, ifs.index)
     clearsky_mw = (clearsky["poa_clearsky"] / 1000.0) * capacity_mw
 
     forecasts_mw = forecasts_det.multiply(
@@ -70,7 +70,7 @@ def run_holdout_eval(
     print(f"\n{'='*50}")
     print(f"Held-out evaluation: {eval_start} → {eval_end}")
     print(f"  N daytime samples: {len(X)}")
-    print(f"  (ERA5 inputs — results are optimistic vs real NWP)")
+    print(f"  (IFS historical inputs — errors match live NWP)")
     print(f"{'='*50}")
     metrics = evaluate(actuals_mw, forecasts_mw)
     print_summary(metrics)

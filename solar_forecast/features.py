@@ -52,7 +52,7 @@ def build_features(
         Output of clearsky.get_clearsky(). Must carry surface_tilt and
         surface_azimuth in df.attrs.
     member_id : int
-        Numeric member identifier. Use -1 for ERA5 / training data.
+        Numeric member identifier. Use -1 for IFS / training data.
     ci_clip : tuple
         (min, max) bounds applied to the clearness index.
 

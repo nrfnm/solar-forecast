@@ -1,5 +1,5 @@
 # solar_forecast/fetch_actuals.py
-"""Fetch historical training data: ERA5 reanalysis inputs + ENTSO-E solar generation targets."""
+"""Fetch historical training data: IFS historical forecast inputs + ENTSO-E solar generation targets."""
 
 import os
 import time
@@ -20,7 +20,7 @@ _SMARD_SOLAR_MODULE_ID = 125   # Photovoltaik: Realisierte Erzeugung DE-LU
 _SMARD_SOLAR_REGION = "DE-LU"
 _SMARD_MWH_TO_MW = 4.0        # SMARD values are MWh/quarter-hour → MW average
 
-_CACHE_DIR = Path(__file__).parent.parent / "data" / "era5_cache"
+_CACHE_DIR = Path(__file__).parent.parent / "data" / "ifs_cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 ENTSOE_URL = "https://web-api.tp.entsoe.eu/api"
@@ -29,18 +29,10 @@ ENTSOE_AREAS = {
     "AT": "10YAT-APG------L",
 }
 
-ERA5_VARIABLES = [
-    "shortwave_radiation",
-    "direct_radiation",
-    "diffuse_radiation",
-    "cloud_cover",
-    "temperature_2m",
-]
-
 
 def _get_om_client() -> openmeteo_requests.Client:
     cache_session = requests_cache.CachedSession(
-        _CACHE_DIR / ".era5_cache", expire_after=-1  # historical data doesn't change
+        _CACHE_DIR / ".ifs_cache", expire_after=-1  # historical data doesn't change
     )
     # Only retries HTTP-level errors (4xx/5xx); application-level rate limits (200 + error JSON)
     # are handled by the _rate_limited_weather_api wrapper below.
@@ -64,60 +56,6 @@ def _rate_limited_weather_api(client, url: str, params: dict, max_retries: int =
     raise RuntimeError(f"Open-Meteo rate limit not cleared after {max_retries} retries")
 
 
-def fetch_era5(
-    lat: float,
-    lon: float,
-    start: str,
-    end: str,
-    tz: str = "Europe/Vienna",
-) -> pd.DataFrame:
-    """
-    Fetch ERA5 reanalysis via Open-Meteo Historical Archive API.
-
-    Parameters
-    ----------
-    lat, lon : float
-    start, end : str
-        "YYYY-MM-DD" inclusive date range.
-    tz : str
-        Target timezone for the returned index. Default "Europe/Vienna".
-
-    Returns
-    -------
-    pd.DataFrame
-        Hourly data with columns matching the single-member output of fetch_nwp:
-        shortwave_radiation, direct_radiation, diffuse_radiation, cloud_cover,
-        temperature_2m. Index is timezone-aware. Compatible with build_features(member_id=-1).
-    """
-    client = _get_om_client()
-    responses = _rate_limited_weather_api(
-        client,
-        "https://archive-api.open-meteo.com/v1/archive",
-        params={
-            "latitude": lat,
-            "longitude": lon,
-            "start_date": start,
-            "end_date": end,
-            "hourly": ERA5_VARIABLES,
-            "timezone": tz,
-        },
-    )
-    response = responses[0]
-    hourly = response.Hourly()
-
-    times = pd.date_range(
-        start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
-        end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
-        freq=pd.Timedelta(seconds=hourly.Interval()),
-        inclusive="left",
-    ).tz_convert(tz)
-
-    return pd.DataFrame(
-        {var: hourly.Variables(i).ValuesAsNumpy() for i, var in enumerate(ERA5_VARIABLES)},
-        index=times,
-    )
-
-
 def fetch_ifs_historical(
     lat: float,
     lon: float,
@@ -128,10 +66,9 @@ def fetch_ifs_historical(
     """
     Fetch deterministic ECMWF IFS historical forecasts from Open-Meteo.
 
-    Available since 2024-02-03. Returns the same structure as fetch_era5() but
-    with all 8 NWP_VARIABLES (including cloud_cover_low/mid/high absent from ERA5).
-    Use instead of ERA5 to close the training/inference distribution gap —
-    the IFS historical forecast has realistic IFS errors, unlike near-perfect ERA5.
+    Available since 2024-02-03. Returns hourly NWP_VARIABLES (shortwave/direct/diffuse
+    radiation, cloud_cover, cloud_cover_low/mid/high, temperature_2m). Index is
+    timezone-aware. Compatible with build_features(member_id=-1).
     """
     from solar_forecast.fetch_nwp import NWP_VARIABLES
 
