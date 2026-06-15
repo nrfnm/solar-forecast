@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from solar_forecast.features import _validate_inputs, build_features, build_all_members
+from solar_forecast.features import _validate_inputs, build_features
 
 EXPECTED_COLUMNS = {
     "ci", "poa_nwp",
@@ -13,7 +13,6 @@ EXPECTED_COLUMNS = {
     "cloud_cover", "cloud_cover_sq", "temperature_2m", "shortwave_radiation",
     "ci_lag1", "ci_lag2", "ci_rolling_mean_3h",
     "cloud_change_1h", "cloud_rolling_mean_3h",
-    "member_id",
 }
 
 
@@ -75,14 +74,6 @@ class TestBuildFeaturesStructure:
     def test_index_preserved(self, nwp_df, clearsky_df):
         feat = build_features(nwp_df, clearsky_df)
         pd.testing.assert_index_equal(feat.index, nwp_df.index)
-
-    def test_member_id_default(self, nwp_df, clearsky_df):
-        feat = build_features(nwp_df, clearsky_df)
-        assert (feat["member_id"] == -1).all()
-
-    def test_member_id_custom(self, nwp_df, clearsky_df):
-        feat = build_features(nwp_df, clearsky_df, member_id=7)
-        assert (feat["member_id"] == 7).all()
 
 
 # ---------------------------------------------------------------------------
@@ -187,30 +178,3 @@ class TestBuildFeaturesLags:
         assert pd.isna(feat["ci_lag2"].iloc[1])
 
 
-# ---------------------------------------------------------------------------
-# build_all_members
-# ---------------------------------------------------------------------------
-
-class TestBuildAllMembers:
-    def test_multiindex_names(self, nwp_df, clearsky_df):
-        result = build_all_members({"member_00": nwp_df, "member_01": nwp_df}, clearsky_df)
-        assert result.index.names == ["member_id", "time"]
-
-    def test_member_ids_parsed_correctly(self, nwp_df, clearsky_df):
-        result = build_all_members({"member_00": nwp_df, "member_03": nwp_df}, clearsky_df)
-        ids = set(result.index.get_level_values("member_id").unique())
-        assert ids == {0, 3}
-
-    def test_total_row_count(self, nwp_df, clearsky_df):
-        nwp_all = {f"member_{i:02d}": nwp_df for i in range(5)}
-        result = build_all_members(nwp_all, clearsky_df)
-        assert len(result) == 5 * len(nwp_df)
-
-    def test_invalid_member_name_falls_back_to_minus_one(self, nwp_df, clearsky_df):
-        result = build_all_members({"ifs": nwp_df}, clearsky_df)
-        ids = set(result.index.get_level_values("member_id").unique())
-        assert ids == {-1}
-
-    def test_all_feature_columns_present(self, nwp_df, clearsky_df):
-        result = build_all_members({"member_00": nwp_df}, clearsky_df)
-        assert EXPECTED_COLUMNS.issubset(set(result.columns))

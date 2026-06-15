@@ -36,7 +36,6 @@ def _validate_inputs(nwp: pd.DataFrame, clearsky: pd.DataFrame) -> None:
 def build_features(
     nwp: pd.DataFrame,
     clearsky: pd.DataFrame,
-    member_id: int = -1,
     ci_clip: tuple = (0.0, 1.1),
 ) -> pd.DataFrame:
     """
@@ -51,15 +50,13 @@ def build_features(
     clearsky : pd.DataFrame
         Output of clearsky.get_clearsky(). Must carry surface_tilt and
         surface_azimuth in df.attrs.
-    member_id : int
-        Numeric member identifier. Use -1 for IFS / training data.
     ci_clip : tuple
         (min, max) bounds applied to the clearness index.
 
     Returns
     -------
     pd.DataFrame
-        One row per timestamp, all feature columns plus member_id.
+        One row per timestamp, all feature columns.
     """
     _validate_inputs(nwp, clearsky)
 
@@ -137,46 +134,6 @@ def build_features(
             "ci_rolling_mean_3h": ci_rolling_mean_3h,
             "cloud_change_1h": cloud_change_1h,
             "cloud_rolling_mean_3h": cloud_rolling_mean_3h,
-            "member_id": int(member_id),
         },
         index=idx,
     )
-
-
-def build_all_members(
-    nwp_all: dict,
-    clearsky: pd.DataFrame,
-    ci_clip: tuple = (0.0, 1.1),
-) -> pd.DataFrame:
-    """
-    Build features for all NWP ensemble members.
-
-    Parameters
-    ----------
-    nwp_all : dict[str, pd.DataFrame]
-        Mapping of member name (e.g. "member_00") to single-member NWP DataFrame.
-    clearsky : pd.DataFrame
-        Output of clearsky.get_clearsky().
-    ci_clip : tuple
-        (min, max) bounds applied to the clearness index.
-
-    Returns
-    -------
-    pd.DataFrame
-        MultiIndex (member_id: int, time: DatetimeIndex).
-    """
-    frames = []
-    for member_name, nwp_df in nwp_all.items():
-        try:
-            mid = int(member_name.split("_")[-1])
-        except (ValueError, AttributeError):
-            mid = -1
-
-        feat = build_features(nwp_df, clearsky, member_id=mid, ci_clip=ci_clip)
-        feat.index = pd.MultiIndex.from_arrays(
-            [np.full(len(feat), mid, dtype=int), feat.index],
-            names=["member_id", "time"],
-        )
-        frames.append(feat)
-
-    return pd.concat(frames)

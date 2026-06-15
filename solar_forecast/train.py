@@ -93,7 +93,6 @@ FEATURE_COLS = [
     "ci_rolling_mean_3h",
     "cloud_change_1h",
     "cloud_rolling_mean_3h",
-    "member_id",
 ]
 
 DEFAULT_PARAMS: dict = config.LGBM_PARAMS
@@ -248,8 +247,7 @@ def prepare_training_data(
 
     # Build clean features and compute CI target from clean IFS
     rng = np.random.default_rng(42)
-    feats_clean = build_features(ifs, clearsky, member_id=-1)
-    feats_clean["member_id"] = rng.integers(0, 100, size=len(feats_clean))
+    feats_clean = build_features(ifs, clearsky)
 
     actuals_aligned = actuals.reindex(feats_clean.index)
     y = _target_ci(actuals_aligned, clearsky, cap, temperature_2m=ifs["temperature_2m"])
@@ -267,8 +265,7 @@ def prepare_training_data(
     all_y = [y_clean]
     for _ in range(n_noise_augments):
         ifs_noisy = _inject_nwp_noise(ifs, rng)
-        feats_noisy = build_features(ifs_noisy, clearsky, member_id=-1)
-        feats_noisy["member_id"] = rng.integers(0, 50, size=len(feats_noisy))
+        feats_noisy = build_features(ifs_noisy, clearsky)
         all_X.append(feats_noisy.loc[valid, FEATURE_COLS])
         all_y.append(y_clean)
 

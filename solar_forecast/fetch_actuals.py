@@ -68,7 +68,7 @@ def fetch_ifs_historical(
 
     Available since 2024-02-03. Returns hourly NWP_VARIABLES (shortwave/direct/diffuse
     radiation, cloud_cover, cloud_cover_low/mid/high, temperature_2m). Index is
-    timezone-aware. Compatible with build_features(member_id=-1).
+    timezone-aware.
     """
     from solar_forecast.fetch_nwp import NWP_VARIABLES
 

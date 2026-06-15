@@ -2,7 +2,7 @@
 Backtest the trained ensemble model against held-out ENTSO-E actuals.
 
 Modes:
-  ensemble  — CI model with member_id spread (default, optimistic CRPS)
+  ensemble  — CI model on AR(1)-noised IFS members (synthetic spread, optimistic CRPS)
   quantile  — 50 quantile models paired with 50 IFS members (proper spread)
   both      — run both and compare
 

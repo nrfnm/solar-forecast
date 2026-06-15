@@ -71,12 +71,7 @@ def run_ensemble(
 
     trajectories = {}
     for member_name, nwp_df in nwp_by_member.items():
-        try:
-            member_id = int(member_name.split("_")[-1])
-        except (ValueError, AttributeError):
-            member_id = -1
-
-        feats = build_features(nwp_df, clearsky, member_id=member_id)
+        feats = build_features(nwp_df, clearsky)
         ci_hourly = pd.Series(
             model.predict(feats[FEATURE_COLS]).clip(0, 1.1), index=feats.index
         )
@@ -133,7 +128,7 @@ def run_quantile_ensemble(
     trajectories = {}
     for i, model in enumerate(models):
         nwp_df = nwp_by_member[i % n_nwp]
-        feats = build_features(nwp_df, clearsky, member_id=i)
+        feats = build_features(nwp_df, clearsky)
         ci_hourly = pd.Series(
             model.predict(feats[FEATURE_COLS]).clip(0, 1.1), index=feats.index
         )
