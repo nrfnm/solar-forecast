@@ -1,5 +1,9 @@
 """
 Generate k-Centroids from Marktstammdatenregister (MaStR)
+
+Data source: Marktstammdatenregister (MaStR), Bundesnetzagentur.
+Licensed under Datenlizenz Deutschland – Namensnennung 2.0 (dl-de/by-2-0).
+https://www.marktstammdatenregister.de
 """
 from open_mastr import Mastr
 from pathlib import Path
@@ -89,6 +93,11 @@ def capacity_timeseries(tz: str = "UTC") -> pd.Series:
     FileNotFoundError
         If the MaStR DB has not been downloaded yet.
     """
+    if _CSV_PATH.exists():
+        s = pd.read_csv(_CSV_PATH, index_col=0, parse_dates=True).iloc[:, 0]
+        s.index = s.index.tz_convert(tz) if s.index.tz is not None else s.index.tz_localize(tz)
+        return s.rename("capacity_mw")
+
     if _DB_PATH.exists() and _DB_PATH.stat().st_size > 0:
         engine = create_engine(f"sqlite:///{_DB_PATH}")
         try:
@@ -114,14 +123,11 @@ def capacity_timeseries(tz: str = "UTC") -> pd.Series:
         monthly.index = monthly.index.tz_localize(tz)
         return monthly.rename("capacity_mw")
 
-    if _CSV_PATH.exists():
-        s = pd.read_csv(_CSV_PATH, index_col=0, parse_dates=True).iloc[:, 0]
-        s.index = s.index.tz_convert(tz) if s.index.tz is not None else s.index.tz_localize(tz)
-        return s.rename("capacity_mw")
+
 
     raise FileNotFoundError(
-        f"Neither MaStR DB ({_DB_PATH}) nor capacity CSV ({_CSV_PATH}) found. "
-        "Run download_db() or provide the CSV."
+        f"Neither ISE Capacity CSV ({_CSV_PATH}) nor MaStR DB ({_DB_PATH}) found."
+        "Run scripts/fetch_capacity_ise.py or run download_db()"
     )
 
 
