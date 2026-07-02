@@ -1,5 +1,5 @@
 # solar_forecast/features.py
-"""Feature engineering for probabilistic solar forecasting (POA/POA clearness index)."""
+"""Feature engineering for probabilistic solar forecasting (POA/POA clear-sky index)."""
 
 import numpy as np
 import pandas as pd
@@ -51,7 +51,7 @@ def build_features(
         Output of clearsky.get_clearsky(). Must carry surface_tilt and
         surface_azimuth in df.attrs.
     ci_clip : tuple
-        (min, max) bounds applied to the clearness index.
+        (min, max) bounds applied to the clear-sky index.
 
     Returns
     -------
@@ -82,7 +82,7 @@ def build_features(
     )
     poa_nwp = poa_components["poa_global"].clip(lower=0)
 
-    # --- Clearness Index ---
+    # --- Clear-Sky Index ---
     is_daytime = clearsky["is_daytime"]
     ci = (poa_nwp / clearsky["poa_clearsky"]).clip(*ci_clip)
     ci = ci.where(is_daytime, 0.0)

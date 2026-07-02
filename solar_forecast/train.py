@@ -106,7 +106,7 @@ def _target_ci(
     temperature_2m: Optional[pd.Series] = None,
 ) -> pd.Series:
     """
-    Compute actual clearness index = actual_mw / clearsky_mw_corrected.
+    Compute actual clear-sky index = actual_mw / clearsky_mw_corrected.
 
     When temperature_2m is supplied, clearsky_mw is multiplied by the Faiman
     panel temperature efficiency factor so the CI target is temperature-neutral
