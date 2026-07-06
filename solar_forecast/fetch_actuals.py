@@ -100,8 +100,12 @@ def fetch_ifs_historical(
     )
 
 
-def _parse_entsoe_xml(xml_text: str) -> pd.Series:
-    """Parse ENTSO-E ActualGenerationPerProductionType XML into hourly UTC MW Series."""
+def _parse_entsoe_xml(xml_text: str, resample_hourly: bool = True) -> pd.Series:
+    """Parse ENTSO-E ActualGenerationPerProductionType XML into UTC MW Series.
+
+    With ``resample_hourly=True`` (default) sub-hourly intervals are averaged to
+    mean MW per hour; with ``False`` the native resolution (15-min for DE-LU) is kept.
+    """
     ns = {"e": "urn:iec62325.351:tc57wg16:451-6:generationloaddocument:3:0"}
     root = ET.fromstring(xml_text)
 
@@ -135,10 +139,10 @@ def _parse_entsoe_xml(xml_text: str) -> pd.Series:
         name="solar_mw",
         dtype=float,
     )
-    # Sum contributions from multiple TimeSeries at the same timestamp (multiple bidding zones),
-    # then average sub-hourly intervals to get mean MW per hour.
-    raw = raw.groupby(raw.index).sum()
-    return raw.sort_index().resample("h").mean()
+    # Sum contributions from multiple TimeSeries at the same timestamp (multiple bidding zones).
+    raw = raw.groupby(raw.index).sum().sort_index()
+    # Optionally average sub-hourly intervals to get mean MW per hour.
+    return raw.resample("h").mean() if resample_hourly else raw
 
 
 def fetch_entsoe(
@@ -146,6 +150,7 @@ def fetch_entsoe(
     start: str,
     end: str,
     api_key: str | None = None,
+    resample_hourly: bool = True,
 ) -> pd.Series:
     """
     Fetch solar generation actuals (B16) from ENTSO-E Transparency Platform.
@@ -195,7 +200,7 @@ def fetch_entsoe(
             timeout=30,
         )
         resp.raise_for_status()
-        chunks.append(_parse_entsoe_xml(resp.text))
+        chunks.append(_parse_entsoe_xml(resp.text, resample_hourly=resample_hourly))
         chunk_start = chunk_end
 
     if not chunks:
@@ -203,7 +208,7 @@ def fetch_entsoe(
 
     combined = pd.concat(chunks).sort_index()
     combined = combined[~combined.index.duplicated(keep="first")]
-    return combined.loc[start_dt : end_dt - pd.Timedelta(hours=1)]
+    return combined[(combined.index >= start_dt) & (combined.index < end_dt)]
 
 
 _SMARD_INDEX_URL = (
