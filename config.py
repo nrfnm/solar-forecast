@@ -6,7 +6,7 @@ from pathlib import Path
 MODEL_PATH = Path(__file__).parent / "models" / "lgbm_ci.pkl"
 QUANTILE_MODEL_PATH = Path(__file__).parent / "models" / "lgbm_quantile.pkl"
 CALIBRATION_PATH = Path(__file__).parent / "models" / "calibration.json"
-FORECAST_ARCHIVE_PATH = Path(__file__).parent / "data" / "nwp_achieve"
+FORECAST_ARCHIVE_PATH = Path(__file__).parent / "data" / "nwp_archive"
 # --- Location ---
 # Single representative centroid for Germany (used until spatial aggregation is implemented)
 LAT = 51.0
