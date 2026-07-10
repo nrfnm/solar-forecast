@@ -63,9 +63,9 @@ def main():
 
         for ax, y, peak_unit in ((ax_ghi, ghi, "W/m²"), (ax_pv, power, "MW/MWp")):
             ax.plot(x, y, color=color, lw=2.4,
-                    label=f"{label} — {daylight_h:.1f} h Tag · Peak {y.max():.0f} {peak_unit}"
+                    label=f"{label}\n{daylight_h:.1f} h Tag · Peak {y.max():.0f} {peak_unit}"
                           if peak_unit == "W/m²"
-                          else f"{label} — {daylight_h:.1f} h Tag · Peak {y.max():.2f} {peak_unit}")
+                          else f"{label}\n{daylight_h:.1f} h Tag · Peak {y.max():.2f} {peak_unit}")
             ax.fill_between(x, y, color=color, alpha=0.12)
 
     for ax in (ax_ghi, ax_pv):
@@ -74,7 +74,8 @@ def main():
         ax.grid(axis="y", linestyle="--", alpha=0.35)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.legend(frameon=False, loc="upper left")
+        ax.set_ylim(top=ax.get_ylim()[1] * 1.30)  # Kopffreiheit oben -> Legende überlappt die Kurve nicht
+        ax.legend(frameon=False, loc="upper left", fontsize=9)
 
     ax_ghi.set_title(f"Solargeometrie-Effekt bei wolkenlosem Himmel — {args.label}")
     ax_ghi.set_ylabel("Clear-Sky GHI  [W/m²]")

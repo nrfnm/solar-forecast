@@ -80,7 +80,8 @@ def main():
     ax.set_ylabel("Breitengrad [°N]")
     ax.set_title(
         f"Kapazitätsgewichtete Gitterpunkte (k={len(centroids)})\n"
-        "Blasengröße & -farbe ∝ Anteil installierter PV-Leistung"
+        f"(Marktstammdatenregister)"
+
     )
     ax.grid(linestyle="--", alpha=0.3, zorder=0)
     for spine in ("top", "right"):
