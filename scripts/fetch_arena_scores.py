@@ -153,7 +153,9 @@ def main() -> None:
     parser.add_argument("--area", default="DE_LU", help="Bidding zone (default: DE_LU)")
     parser.add_argument("--me", type=int, default=19, help="Your participant id (default: 19 = spinner)")
     parser.add_argument("--baseline", type=int, default=1, help="Baseline participant id (default: 1)")
-    parser.add_argument("--start", default="2026-06-01", help="Window start date YYYY-MM-DD")
+    parser.add_argument("--participants", default=None,
+                        help="Comma-separated participant ids to fetch (default: me,baseline)")
+    parser.add_argument("--start", default=None, help="Window start date YYYY-MM-DD")
     parser.add_argument("--end", default=None, help="Window end date YYYY-MM-DD (default: tomorrow)")
     parser.add_argument("--api-base", default=None, help="Override ARENA_API_BASE_URL")
     parser.add_argument("--out-dir", default=str(_OUT_DIR), help="Output directory")
@@ -162,13 +164,17 @@ def main() -> None:
     end = args.end or str(date.today() + timedelta(days=1))
     api_base = args.api_base or _load_env("ARENA_API_BASE_URL") or _DEFAULT_API_BASE
     api_key = _load_env("ARENA_API_KEY")
-    participant_ids = f"{args.me},{args.baseline}"
+    if args.participants:
+        ids = [int(x) for x in args.participants.split(",") if x.strip() != ""]
+    else:
+        ids = [args.me, args.baseline]
+    participant_ids = ",".join(str(i) for i in ids)
     window_start = f"{args.start}T00:00:00Z"
     window_end = f"{end}T00:00:00Z"
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = f"ch{args.challenge_id}_{args.me}-{args.baseline}_{args.start}_{end}"
+    slug = f"ch{args.challenge_id}_{'-'.join(str(i) for i in ids)}_{args.start}_{end}"
 
     print(f"Fetching timeseries: challenge {args.challenge_id} / {args.area} / ids {participant_ids}")
     print(f"  window {window_start} → {window_end}")
@@ -202,7 +208,9 @@ def main() -> None:
     if not actuals.empty:
         actuals.to_frame().to_parquet(out_dir / f"arena_actuals_{slug}.parquet")
         print(f"  actuals ({len(actuals)} slots) → arena_actuals_{slug}.parquet")
-    for label, pid in (("me", args.me), ("baseline", args.baseline)):
+    labels = {args.me: "me", args.baseline: "baseline"}
+    for pid in ids:
+        label = labels.get(pid, f"p{pid}")
         fc = _forecast_frame(body, pid)
         if not fc.empty:
             fc.to_parquet(out_dir / f"arena_forecast_{label}_p{pid}_{slug}.parquet")
