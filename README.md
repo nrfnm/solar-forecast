@@ -221,7 +221,7 @@ Set `config.CENTROIDS = None` to fall back to the single `LAT`/`LON` point.
 
 ## 7. energy-arena integration
 
-This repo is **platform-agnostic** — it returns 50 trajectories as a DataFrame
+This repo is **platform-agnostic** — it returns the trajectories as a DataFrame
 and knows nothing about the competition payload format. The integration lives in
 [`custom_model.py`](custom_model.py), which adapts the trajectories into the
 arena submission payload and passes the arena runtime config (area, challenge id,
@@ -239,8 +239,9 @@ Setup:
 4. Ensure this repo still has its own `.env` (see §2) — the pipeline reads it.
 5. Automate on a VM (e.g. cron) as described in the starter repo.
 
+### NWP Ensemble Crawler
 To enable proper EMOS calibration later, archive the live NWP ensemble once per
-day at submission time with [`run_collect_ensemble.sh`](run_collect_ensemble.sh)
+day at submission time with [`run_collect_ensemble.sh`](run_collect_ensemble.sh), optimally with a cronjob
 (Open-Meteo only serves the current run, so the archive can only grow forward).
 
 ---
