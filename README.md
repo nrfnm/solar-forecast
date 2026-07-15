@@ -7,24 +7,39 @@ Developed as part of a seminar at Karlsruher Institut für Technologie
 ([KIT](https://kit.edu)), Institut für Industriebetriebslehre und Industrielle
 Produktion ([IIP](https://www.iip.kit.edu)).
 
-The model does not predict raw power directly. It predicts the **Clear-Sky Index**
+The model does not predict raw power directly. It predicts the **Clear-Sky
+Index** `k_PV` — the ratio of actual power to the clear-sky power a clear day
+would yield:
 
 ```
-CI = P_actual / P_clearsky
+k_PV = P_actual / P_clearsky
 ```
 
-with a LightGBM model, then multiplies the predicted CI back by a pvlib
-clear-sky power curve and the installed capacity. Factoring out the
-deterministic solar geometry first removes most seasonal bias and leaves the ML
-model to learn only the residual (cloud attenuation, temperature effects). The
-trained model is applied across all **50 Open-Meteo NWP ensemble members** to
+A LightGBM model predicts `k_PV`, which is then multiplied back by a pvlib
+clear-sky power curve and the installed capacity to recover MW. Factoring out
+the deterministic solar geometry first removes most seasonal bias and leaves the
+ML model to learn only the residual (cloud attenuation, temperature effects).
+The model is applied across all **50 Open-Meteo NWP ensemble members** to
 produce 50 calibrated MW trajectories.
 
 ```
-Open-Meteo Ensemble (50 members)
-        │
-        ▼
-  pvlib clear-sky power  ──►  CI features  ──►  LightGBM  ──►  50 MW trajectories
+        Open-Meteo NWP ensemble  —  50 members
+        (irradiance, cloud cover, temperature)
+                        │
+                        ▼
+   features   (pvlib clear-sky power P_clearsky, k_PV, time, lags)
+                        │
+                        ▼
+        LightGBM   ──►   predicted  k_PV     (per member)
+                        │
+                        ▼
+   power  =  k_PV × P_clearsky × installed capacity   (back to MW)
+                        │
+                        ▼
+             EMOS spread calibration
+                        │
+                        ▼
+   50 calibrated MW trajectories   (hourly, day-ahead)
 ```
 
 ---
@@ -74,7 +89,7 @@ Model, physics, and geometry settings live in [`config.py`](config.py):
 |---|---|
 | `LAT`, `LON`, `ALTITUDE` | Single fallback grid point (used when `CENTROIDS` is `None`) |
 | `SURFACE_TILT`, `SURFACE_AZIMUTH` | Panel geometry for the pvlib POA calculation |
-| `CAPACITY_MW` | Total installed DE solar capacity — converts CI to MW (**verify before use**) |
+| `CAPACITY_MW` | Total installed DE solar capacity — converts `k_PV` to MW (**verify before use**) |
 | `CENTROIDS` | Capacity-weighted grid points for spatial aggregation (see §6) |
 | `LGBM_PARAMS` | LightGBM hyperparameters |
 | `FORECAST_DAYS` | Forecast horizon in days |
@@ -92,14 +107,14 @@ run from the repo root with the venv active.
 
 ### Stage A — Train the model
 
-Trains the global LightGBM CI model on ECMWF IFS-historical inputs (Open-Meteo
+Trains the global LightGBM `k_PV` model on ECMWF IFS-historical inputs (Open-Meteo
 `historical-forecast-api`) and ENTSO-E solar generation targets, with
 walk-forward CV. Writes `models/lgbm_ci.pkl`.
 
 ```bash
 python -m solar_forecast.train --start 2020-01-01 --end 2023-12-31
 
-# also train the 100 quantile CI models (writes models/lgbm_quantile.pkl):
+# also train the 100 quantile k_PV models (writes models/lgbm_quantile.pkl):
 python -m solar_forecast.train --start 2020-01-01 --end 2023-12-31 --quantile
 ```
 
@@ -111,7 +126,7 @@ Useful flags: `--area {DE,AT}`, `--capacity-mw`, `--no-cv`,
 
 ### Stage B — Daily forecast
 
-Fetches the live 50-member NWP ensemble, runs the CI ensemble, applies
+Fetches the live 50-member NWP ensemble, runs the `k_PV` ensemble, applies
 calibration, and writes `data/forecasts/<date>.parquet` (timesteps × 50
 scenarios, in MW).
 
@@ -237,7 +252,7 @@ solar_forecast/
 ├── clearsky.py      # pvlib Ineichen clear-sky POA power
 ├── fetch_nwp.py     # Open-Meteo 50-member ensemble (cached)
 ├── fetch_actuals.py # IFS historical + ENTSO-E solar actuals
-├── features.py      # CI, cyclic encodings, solar geometry, lags
+├── features.py      # k_PV, cyclic encodings, solar geometry, lags
 ├── train.py         # LightGBM + walk-forward CV  (CLI)
 ├── ensemble.py      # apply model across 50 members → MW trajectories
 ├── calibrate.py     # PIT/EMOS spread correction  (CLI)
