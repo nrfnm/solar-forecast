@@ -33,6 +33,7 @@ dev = [
     "pytest-cov",
     "jupyter>=1.0",
     "matplotlib>=3.7",
+    "geopandas>=0.14",         # scripts/plot_centroids.py
 ]
 
 [tool.setuptools.packages.find]
