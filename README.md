@@ -36,7 +36,7 @@ produce 50 calibrated MW trajectories.
    power  =  k_PV × P_clearsky × installed capacity   (back to MW)
                         │
                         ▼
-             EMOS spread calibration
+          EMOS calibration (trunc-normal + ECC)
                         │
                         ▼
    50 calibrated MW trajectories   (hourly, day-ahead)
@@ -105,24 +105,75 @@ submission repo and passed into `pipeline.run()`. See §7.
 The modules run in a fixed order — each stage feeds the next. All commands are
 run from the repo root with the venv active.
 
-### Stage A — Train the model
+**Running from scratch** (another machine, no shipped artifacts). Follow these
+steps in order; each links to its section below:
 
-Trains the global LightGBM `k_PV` model on ECMWF IFS-historical inputs (Open-Meteo
-`historical-forecast-api`) and ENTSO-E solar generation targets, with
-walk-forward CV. Writes `models/lgbm_ci.pkl`.
+1. **Centroids** (Stage 0) — generate the capacity-weighted grid points and
+   paste them into `config.CENTROIDS`. Do this **first**: training aggregates IFS
+   across exactly these points.
+2. **Train + fit EMOS** (Stage A) — one command,
+   `python scripts/retrain_with_ifs.py`, retrains the `k_PV` model on IFS
+   historical and refits EMOS → `models/lgbm_ci.pkl` + `models/calibration.json`.
+3. **Daily forecast** (Stage B) — verify a single run produces trajectories.
+4. **Automate** ([§7](#7-energy-arena-integration)) — wire the daily run into
+   the energy-arena submission repo (cron on a VM).
+
+
+
+### Stage 0 — Generate centroids
+
+Derive the capacity-weighted grid points the forecast aggregates over
+(`P_country = Σᵢ wᵢ · Pᵢ`) from Marktstammdatenregister (MaStR) installed-capacity
+data, then paste the printed list into `config.CENTROIDS`. Do this **before**
+training — Stage A aggregates IFS across exactly these points. See
+[§6](#6-spatial-clustering-grid-points) for the data sources and details.
 
 ```bash
-python -m solar_forecast.train --start 2020-01-01 --end 2023-12-31
-
-# also train the 100 quantile k_PV models (writes models/lgbm_quantile.pkl):
-python -m solar_forecast.train --start 2020-01-01 --end 2023-12-31 --quantile
+python -m solar_forecast.capacity --k 15                   # k-means centroids
+python -m solar_forecast.capacity --k 15 --force-download  # re-download MaStR first
+# → copy the printed list into config.CENTROIDS
 ```
 
-Useful flags: `--area {DE,AT}`, `--capacity-mw`, `--no-cv`,
-`--augments N` (noise-augmented IFS copies, default 4).
+Skip this to keep the committed default `config.CENTROIDS`, or set
+`config.CENTROIDS = None` to fall back to the single `LAT`/`LON` point.
 
-> A pre-trained `models/lgbm_ci.pkl` and `models/lgbm_quantile.pkl` ship with
-> the repo, so you can skip this step to just run or evaluate the shipped model.
+### Stage A — Train the model and fit EMOS
+
+`scripts/retrain_with_ifs.py` runs the whole training + calibration pipeline in
+one command, anchored on ECMWF IFS-historical inputs (Open-Meteo
+`historical-forecast-api`) and ENTSO-E / SMARD solar actuals, with a sensible
+train/backtest split. This is the recommended setup path:
+
+```bash
+python scripts/retrain_with_ifs.py
+#  Step 1  train LightGBM   (2024-02-03 → backtest-start)  → models/lgbm_ci.pkl
+#  Step 2  backtest         (backtest-start → backtest-end)
+#  Step 3  refit EMOS       (fit_emos on the held-out window) → models/calibration.json
+#  Step 4  print raw vs. calibrated backtest metrics
+```
+
+Flags: `--train-start` (default `2024-02-03`, earliest IFS date),
+`--backtest-start` (default `2025-09-01`), `--backtest-end` (default
+`2026-05-31`), `--emos-only` (skip the LightGBM retrain and only refit EMOS on
+the backtest window — use this after tweaking calibration).
+
+Training aggregates IFS across `config.CENTROIDS`, so those must be set first
+(step 1 of the checklist above).
+
+<details>
+<summary>Lower-level entry points (finer control)</summary>
+
+```bash
+# train only  (add --quantile for the 100 quantile k_PV models → models/lgbm_quantile.pkl)
+python -m solar_forecast.train --start 2024-02-03 --end 2025-09-01
+#   useful flags: --area {DE,AT}, --capacity-mw, --no-cv, --augments N (default 4)
+
+# backtest + fit EMOS only
+python scripts/backtest.py --start 2025-09-01 --end 2026-05-31 --mode ensemble \
+    --save data/processed/backtest.parquet
+```
+</details>
+
 
 ### Stage B — Daily forecast
 
@@ -138,17 +189,23 @@ python pipeline.py --date 2026-07-16 --no-save  # print only, don't write
 
 `scripts/run_daily.sh` wraps this for a local cron job (targets tomorrow).
 
-### Stage C — Fit calibration (optional, run once)
+### Stage C — Calibration details
 
-EMOS/spread calibration fitted on a backtest window; writes
-`models/calibration.json`, which `pipeline.py` then applies automatically.
+Stage A already fits the calibration; this explains what it does. The pipeline
+calibrates via **EMOS** (`apply_emos`): a truncated-normal distribution
+`μ = a + b·ens_mean`, `σ² = c + d·ens_var` fitted by CRPS minimisation, with the
+NWP member ranks mapped through it by Ensemble Copula Coupling (ECC) to keep each
+trajectory temporally coherent. The fitted `a, b, c, d` live in
+`models/calibration.json`, which `pipeline.py` loads and applies automatically.
+
+To refit calibration only (e.g. after a new backtest window) without retraining
+LightGBM, use `python scripts/retrain_with_ifs.py --emos-only`.
+
+A simpler **bias + spread** correction (single spread factor, no per-timestep
+`σ`) is also available via the `calibrate` CLI. `apply_emos` falls back to it
+automatically when `calibration.json` carries no `emos` key:
 
 ```bash
-# 1. produce a backtest parquet
-python scripts/backtest.py --start 2024-01-01 --end 2024-06-30 --mode ensemble \
-    --save data/processed/backtest.parquet
-
-# 2. fit calibration against actuals for that window
 python -m solar_forecast.calibrate --forecast data/processed/backtest.parquet \
     --start 2024-01-01 --end 2024-06-30
 ```
@@ -255,7 +312,7 @@ solar_forecast/
 ├── features.py      # k_PV, cyclic encodings, solar geometry, lags
 ├── train.py         # LightGBM + walk-forward CV  (CLI)
 ├── ensemble.py      # apply model across 50 members → MW trajectories
-├── calibrate.py     # PIT/EMOS spread correction  (CLI)
+├── calibrate.py     # EMOS (trunc-normal + ECC) + bias/spread fallback  (CLI)
 ├── evaluate.py      # CRPS, skill score, PIT       (CLI)
 ├── capacity.py      # MaStR k-means centroids       (CLI)
 └── collect_ensemble_forecasts.py  # daily NWP archiver (CLI)

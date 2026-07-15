@@ -53,12 +53,6 @@ def pit_midrank(obs: np.ndarray, F: np.ndarray) -> np.ndarray:
     return (less + 0.5 * equal) / F.shape[1]
 
 
-def reliability_l1(pit: np.ndarray) -> float:
-    """L1 deviation of the PIT histogram from uniform (0 = perfectly flat)."""
-    hist, _ = np.histogram(pit, bins=NBINS, range=(0, 1))
-    return float(np.abs(hist / hist.sum() - 1 / NBINS).sum())
-
-
 def main():
     ap = argparse.ArgumentParser(description="Aggregated daytime PIT histogram (night excluded)")
     ap.add_argument("--ts", default="data/eval_cache/arena_ts_ch16_1-2-8-17-19-20-26_2026-06-06_2026-07-07.json")
@@ -83,7 +77,6 @@ def main():
 
     fc, obs = fc[mask], obs[mask]
     pit = pit_midrank(obs.values, fc.values)
-    rel = reliability_l1(pit)
     ndays = len(set(obs.index.normalize()))
 
     plt.rcParams.update({"font.size": 10})
@@ -100,8 +93,7 @@ def main():
     ax.legend(frameon=False, fontsize=9)
     ax.set_title(
         f"Daytime PIT · {args.participant} · {args.start} – {args.end}\n"
-        f"(daytime {DAY_FROM}–{DAY_TO}, {ndays} days)\n"
-        f"PIT̄={pit.mean():.3f}  reliability-L1={rel:.3f}  n={len(pit)}",
+        f"(daytime {DAY_FROM}–{DAY_TO}, {ndays} days)",
         fontsize=10,
     )
 
