@@ -1,0 +1,22 @@
+,0
+Fenster,2026-06-07 .. 2026-07-07
+Wettkampftage,31
+davon eingereicht,28
+davon imputiert (Naive),3
+impute-Modus,True
+mean CRPS spinner [MW],1788.7
+mean CRPS Naive [MW],4538.1
+pooled Skill (eingereicht),0.647
+pooled Skill (impute),0.606
+mean daily Skill (eingereicht),0.503
+self vs arena |Δ| [%],0.0
+PIT-Bias (Tageslicht),0.106
+Dispersion (Tageslicht),1.195
+PIT-Bias (alle Slots),0.218
+Dispersion (alle Slots),1.183
+COVERAGE_50 (Ziel 50),29.1
+COVERAGE_90 (Ziel 90),42.8
+COVERAGE_50 self (o. Nacht),40.7
+COVERAGE_50 self (m. Nacht),29.1
+COVERAGE_90 self (o. Nacht),59.9
+COVERAGE_90 self (m. Nacht),42.8
