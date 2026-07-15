@@ -1,15 +1,19 @@
 """
-Full probabilistic-forecast metric table for cached energy-arena ensembles.
+Probabilistic-forecast comparison table for cached energy-arena ensembles.
 
-Computes, per participant, over a window (with day-persistence imputation of
-missing days): deterministic errors, CRPS + normalizations, pinball/WIS,
-interval coverage & sharpness, PIT-based calibration, and the multivariate
-Energy Score. Comparison without relying on a skill score.
+Primary scores (CRPS, WIS, RMSE, Energy Score, Variogram Score, all-slot
+coverage) are taken directly from the platform's own per-day metrics
+(``participant_metrics`` in the snapshot) and averaged over the window's
+delivery days — no local recomputation, no imputation (each participant is
+scored on the days it actually submitted; see the ``n_days`` column).
+
+PIT calibration is not exposed by the API and is computed locally from the
+archived ensembles, restricted to daylight slots (ensemble spread > 0).
 
 Usage:
   python scripts/eval_probabilistic_metrics.py \
-      --ts data/eval_cache/arena_ts_ch16_all_2026-06-01_2026-07-07.json \
-      --start 2026-06-07 --end 2026-07-06 \
+      --ts data/eval_cache/arena_ts_ch16_1-2-8-17-19-20-26_2026-06-06_2026-07-07.json \
+      --start 2026-06-07 --end 2026-07-08 \
       --out paper/results_ch16_metrics.csv
 """
 
@@ -20,50 +24,39 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import properscoring as ps
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 TZ = "Europe/Berlin"
-QLEVELS = np.array([0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95])
-WIS_ALPHAS = np.array([0.1, 0.2, 0.5])            # central intervals 90/80/50 %
-COVER_LEVELS = [0.5, 0.8, 0.9]
-DAY_FROM, DAY_TO = "05:00", "21:00"
+COVER_LEVELS = [0.5, 0.9]
 
 
 def load(ts_path):
+    """Return (participants, ground_truth, api_metrics).
+
+    api_metrics maps participant name -> DataFrame of the platform's per-day
+    metrics, indexed by target_start (UTC).
+    """
     d = json.load(open(ts_path))
     gt = pd.Series({pd.Timestamp(x["ts"]): x["value"] for x in d["ground_truth"]}).sort_index()
     gt.index = gt.index.tz_convert(TZ)
-    return d["participants"], gt
+    api = {}
+    for pm in d.get("participant_metrics", []):
+        recs = {pd.Timestamp(p["target_start"]): p["metrics"] for p in pm["points"]}
+        api[pm["participant_name"]] = pd.DataFrame(recs).T.sort_index()
+    return d["participants"], gt, api
 
 
-def impute_day_persistence(fc, grid):
-    """Reindex to grid; fill missing whole days with same-time-of-day neighbour."""
-    fc = fc[~fc.index.duplicated()].reindex(grid)
-    return fc.groupby(fc.index.time, group_keys=False).apply(lambda g: g.ffill().bfill())
-
-
-def pinball(o, q, tau):
-    d = o - q
-    return np.maximum(tau * d, (tau - 1) * d)
-
-
-def wis(o, Q):
-    """Weighted interval score from quantile forecasts Q (T × len(QLEVELS))."""
-    med = Q[:, np.where(QLEVELS == 0.5)[0][0]]
-    total = 0.5 * np.abs(o - med)
-    for a in WIS_ALPHAS:
-        lo = Q[:, np.argmin(np.abs(QLEVELS - a / 2))]
-        hi = Q[:, np.argmin(np.abs(QLEVELS - (1 - a / 2)))]
-        below = (o < lo) * (2 / a) * (lo - o)
-        above = (o > hi) * (2 / a) * (o - hi)
-        total = total + (a / 2) * ((hi - lo) + below + above)
-    return total / (len(WIS_ALPHAS) + 0.5)
+def daylight_cov(F, o, day, lv):
+    """Empirical coverage of the central lv-interval on daylight slots (submitted days)."""
+    Fd, od = F[day], o[day]
+    lo = np.quantile(Fd, (1 - lv) / 2, axis=1)
+    hi = np.quantile(Fd, 1 - (1 - lv) / 2, axis=1)
+    return ((od >= lo) & (od <= hi)).mean() * 100
 
 
 def pit_calibration(o, F, mask):
-    """PIT via mid-rank on masked steps; return reliability (hist L1 dev) + coverage errors."""
+    """PIT via mid-rank on masked steps; return reliability (hist L1 dev) + mean."""
     o_m, F_m = o[mask], F[mask]
     less = (F_m < o_m[:, None]).sum(1)
     equal = (F_m == o_m[:, None]).sum(1)
@@ -74,87 +67,90 @@ def pit_calibration(o, F, mask):
     return reliability, pit.mean()
 
 
-def energy_score(o, F, dates):
-    """Mean daily multivariate Energy Score over full-day trajectories."""
-    scores = []
-    pos = np.arange(len(o))
-    for _, grp in pd.Series(pos).groupby(np.asarray(dates)):
-        idx = grp.values
-        y = o[idx]                       # (D,)
-        X = F[idx]                       # (D, M)
-        M = X.shape[1]
-        term1 = np.linalg.norm(X - y[:, None], axis=0).mean()
-        diff = X[:, :, None] - X[:, None, :]
-        term2 = np.linalg.norm(diff, axis=0).mean()
-        scores.append(term1 - 0.5 * term2)
-    return float(np.mean(scores))
-
-
 def main():
-    ap = argparse.ArgumentParser(description="Full probabilistic metric table")
-    ap.add_argument("--ts", default="data/eval_cache/arena_ts_ch16_all_2026-06-01_2026-07-07.json")
+    ap = argparse.ArgumentParser(description="API-based probabilistic metric table")
+    ap.add_argument("--ts", default="data/eval_cache/arena_ts_ch16_1-2-8-17-19-20-26_2026-06-06_2026-07-07.json")
     ap.add_argument("--start", default="2026-06-07")
-    ap.add_argument("--end", default="2026-07-06")
+    ap.add_argument("--end", default="2026-07-08")
     ap.add_argument("--out", help="Optional CSV output path")
+    ap.add_argument("--impute", action="store_true",
+                    help="Fill each participant's non-submitted delivery days with the "
+                         "baseline's daily metrics (skill 0) so all are scored over the "
+                         "full window; default off = score on submitted days only.")
+    ap.add_argument("--baseline", default="NaiveBenchmark",
+                    help="Participant whose daily metrics impute missing days (--impute).")
     args = ap.parse_args()
 
-    participants, gt = load(args.ts)
+    participants, gt, api = load(args.ts)
     start = pd.Timestamp(args.start, tz=TZ)
     end = pd.Timestamp(args.end, tz=TZ)
     grid = pd.date_range(start, end, freq="15min", tz=TZ, inclusive="left")
+    deliver_dates = pd.Index(grid.normalize().unique())
     obs = gt.reindex(gt.index.union(grid)).interpolate("time").reindex(grid)
     o = obs.values
-    day = np.zeros(len(grid), bool)
-    day[obs.index.indexer_between_time(DAY_FROM, DAY_TO)] = True
-    dates = obs.index.normalize()
-    mo, mod, pk = obs.mean(), obs[day].mean(), obs.max()
+    mo, mod, pk = obs.mean(), obs[obs > 0].mean(), obs.max()
+
+    def window_days(name):
+        """Participant's daily API metrics, indexed by Berlin delivery date, in window."""
+        am = api[name].copy()
+        am.index = am.index.tz_convert(TZ).normalize()
+        return am[am.index.isin(deliver_dates)]
+
+    if args.baseline not in api:
+        raise SystemExit(f"--baseline {args.baseline!r} not in snapshot")
+    base_daily = window_days(args.baseline)   # daily baseline CRPS, for skill + imputation
 
     rows = []
     for p in participants:
+        name = p["participant_name"]
+        if name not in api:
+            continue
+
+        # --- platform (API) scores: mean over the window's delivery days ---
+        am_w = window_days(name)
+        n_sub = len(am_w)
+        n_imputed = 0
+        if args.impute:
+            full = am_w.reindex(deliver_dates)
+            miss = full.index[full["CRPS"].isna()]
+            full.loc[miss] = base_daily.reindex(miss)     # missing day := baseline (skill 0)
+            am_w, n_imputed = full, len(miss)
+        row = dict(
+            participant=name,
+            n_days=n_sub,
+            n_imputed=n_imputed,
+            CRPS=am_w["CRPS"].mean(),
+            WIS=am_w["WIS"].mean(),
+            RMSE_mean=am_w["RMSE_MEAN"].mean(),
+            EnergyScore=am_w["ENERGY_SCORE"].mean(),
+            VariogramScore=am_w["VARIOGRAM_SCORE"].mean(),
+            cover50_pct=am_w["COVERAGE_50"].mean(),   # all slots (platform)
+            cover90_pct=am_w["COVERAGE_90"].mean(),
+        )
+        # CRPS skill vs baseline, over the same days this participant is scored on
+        base_crps = base_daily["CRPS"].reindex(am_w.index).mean()
+        row["skill"] = 1 - row["CRPS"] / base_crps
+
+        # --- daylight coverage + PIT: local, from the archived ensembles (submitted days) ---
         idx = pd.to_datetime([e["ts"] for e in p["ensemble_points"]]).tz_convert(TZ)
         fc = pd.DataFrame(np.array([e["values"] for e in p["ensemble_points"]], float), index=idx).sort_index()
-        imputed = int((~fc[~fc.index.duplicated()].reindex(grid).iloc[:, 0].notna()).sum())
-        fc = impute_day_persistence(fc, grid)
+        fc = fc[~fc.index.duplicated()].reindex(grid)     # NaN on days not submitted
         F = fc.values
-        med = np.median(F, axis=1)
-        mean = F.mean(1)
-        Q = np.quantile(F, QLEVELS, axis=1).T
-
-        crps = ps.crps_ensemble(o, F)
-        rel, pit_mean = pit_calibration(o, F, day)
-
-        row = dict(
-            participant=p["participant_name"],
-            imputed_steps=imputed,
-            # deterministic
-            MAE_median=np.abs(o - med).mean(),
-            RMSE_mean=np.sqrt(((o - mean) ** 2).mean()),
-            Bias_mean=(mean - o).mean(),
-            # CRPS + normalizations
-            CRPS=crps.mean(),
-            CRPS_day=crps[day].mean(),
-            nCRPS_mean_pct=crps.mean() / mo * 100,
-            nCRPS_peak_pct=crps.mean() / pk * 100,
-            # quantile / interval scores
-            Pinball_mean=np.mean([pinball(o, Q[:, i], t) for i, t in enumerate(QLEVELS)]),
-            WIS=wis(o, Q).mean(),
-            # sharpness (interval width) + coverage
-        )
+        valid = fc.iloc[:, 0].notna().values
+        day = np.zeros(len(F), bool)
+        day[valid] = F[valid].max(axis=1) > 0             # daylight = non-zero spread
         for lv in COVER_LEVELS:
-            lo = np.quantile(F, (1 - lv) / 2, axis=1)
-            hi = np.quantile(F, 1 - (1 - lv) / 2, axis=1)
-            cov = ((o >= lo) & (o <= hi))[day].mean() * 100
-            row[f"cover{int(lv*100)}_pct"] = cov
-            row[f"width{int(lv*100)}_day"] = (hi - lo)[day].mean()
-        row["reliability_L1"] = rel        # 0 = perfectly calibrated PIT
-        row["PIT_mean"] = pit_mean          # ~0.5 if unbiased
-        row["EnergyScore"] = energy_score(o, F, dates)
+            row[f"cover{int(lv * 100)}_day"] = daylight_cov(F, o, day, lv)
+        row["reliability_L1"], row["PIT_mean"] = pit_calibration(o, F, day)
         rows.append(row)
 
     res = pd.DataFrame(rows).set_index("participant").sort_values("CRPS")
     pd.set_option("display.width", 260, "display.max_columns", 40)
-    print(f"Window {start.date()} → {end.date()}  n={len(grid)} steps")
-    print(f"mean_obs={mo:.0f} MW  mean_obs_day={mod:.0f} MW  peak_obs={pk:.0f} MW\n")
+    print(f"Window {start.date()} → {end.date()}  ({len(deliver_dates)} delivery days)")
+    print(f"mean_obs={mo:.0f} MW  mean_obs_day={mod:.0f} MW  peak_obs={pk:.0f} MW")
+    agg = f"full window, missing days imputed with '{args.baseline}'" if args.impute else "submitted days only, no imputation"
+    print(f"Scores: platform API, mean over {agg}")
+    print("PIT: local, daylight slots only\n")
     print(res.round(2).T.to_string())
 
     if args.out:
